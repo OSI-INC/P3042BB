@@ -56,8 +56,8 @@ entity main is
 		ETH : in std_logic;
 		EGRN, EYLW : out std_logic;
 		
-		ram_addr : out std_logic_vector(20 downto 0);
-		ram_data : inout std_logic_vector(7 downto 0);
+		buff_addr : out std_logic_vector(20 downto 0);
+		buff_data : inout std_logic_vector(7 downto 0);
 		REN_not : out std_logic;
 		RWE_not : out std_logic;
 		
@@ -426,7 +426,7 @@ begin
 			write_ptr := std_logic_vector(to_unsigned(0,21));
 			read_ptr := std_logic_vector(to_unsigned(0,21));
 			fifo_byte_count <= std_logic_vector(to_unsigned(0,21));
-			ram_data <= high_z_byte;
+			buff_data <= high_z_byte;
 			mrd_data <= max_data_byte;
 			REN := false;
 			RWE := false;
@@ -441,47 +441,47 @@ begin
 					if not MWRS then MWRACK <= false; end if;
 					if not MRDS then MRDACK <= false; end if;
 					if MWRS and (not MWRACK) then 
-						ram_addr <= write_ptr;
-						ram_data <= mwr_data;
+						buff_addr <= write_ptr;
+						buff_data <= mwr_data;
 						REN := false;
 						RWE := true;
 						next_state := 1; 
 					elsif MRDS and (not MRDACK) then
 						if to_integer(unsigned(fifo_byte_count)) /= 0 then
-							ram_addr <= read_ptr;
-							ram_data <= high_z_byte;
+							buff_addr <= read_ptr;
+							buff_data <= high_z_byte;
 							REN := true;
 							RWE := false;
 							next_state := 4;
 						else
-							ram_addr <= read_ptr;
-							ram_data <= high_z_byte;
+							buff_addr <= read_ptr;
+							buff_data <= high_z_byte;
 							REN := false;
 							RWE := false;
 							next_state := 0;
 						end if;
 					else
-						ram_addr <= read_ptr;
-						ram_data <= high_z_byte;
+						buff_addr <= read_ptr;
+						buff_data <= high_z_byte;
 						REN := false;
 						RWE := false;
 						next_state := 0;					
 					end if;
 				when 1 =>
-					ram_addr <= write_ptr;
-					ram_data <= mwr_data;
+					buff_addr <= write_ptr;
+					buff_data <= mwr_data;
 					REN := true;
 					RWE := true;
 					next_state := 2;
 				when 2 =>
-					ram_addr <= write_ptr;
-					ram_data <= mwr_data;
+					buff_addr <= write_ptr;
+					buff_data <= mwr_data;
 					REN := false;
 					RWE := true;
 					next_state := 3;
 				when 3 =>
-					ram_addr <= write_ptr;
-					ram_data <= mwr_data;
+					buff_addr <= write_ptr;
+					buff_data <= mwr_data;
 					REN := false;
 					RWE := false;
 					MWRACK <= true;
@@ -489,15 +489,15 @@ begin
 					fifo_byte_count <= std_logic_vector(unsigned(fifo_byte_count) + 1);
 					next_state := 0;
 				when 4 =>
-					ram_addr <= read_ptr;
-					ram_data <= high_z_byte;
-					mrd_data <= ram_data;
+					buff_addr <= read_ptr;
+					buff_data <= high_z_byte;
+					mrd_data <= buff_data;
 					REN := true;
 					RWE := false;
 					next_state := 5;
 				when 5 =>
-					ram_addr <= read_ptr;
-					ram_data <= high_z_byte;
+					buff_addr <= read_ptr;
+					buff_data <= high_z_byte;
 					REN := false;
 					RWE := false;
 					MRDACK <= true;
@@ -505,8 +505,8 @@ begin
 					fifo_byte_count <= std_logic_vector(unsigned(fifo_byte_count) - 1);
 					next_state := 0;
 				when others =>
-					ram_addr <= read_ptr;
-					ram_data <= high_z_byte;
+					buff_addr <= read_ptr;
+					buff_data <= high_z_byte;
 					REN := false;
 					RWE := false;
 					next_state := 0;
