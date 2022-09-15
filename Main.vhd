@@ -3,6 +3,14 @@
 
 -- V1.1, 15-SEP-22: Based upon P3038BB v8.3.
 
+-- V1.2, 15-SEP-22: Use DC5 and DC6 for communiation with display
+-- panel. We use DC6 for Serial Data Out (SDO) and DC5 for Serial-- Data In (SDI). These signals are SHOW and HIDE on the detector
+-- modules, so communication will cause some flickering of the lights
+-- on the detectors. The HIDE switch will have no effect on detectors
+-- but the SHOW will stop SDO and turn on all the lights. The CPU can
+-- send serial bytes at 1 Mbps by writing to the sdo_register in memory. 
+
+
 -- Global constants and types.  
 library ieee;  
 use ieee.std_logic_1164.all;
@@ -40,8 +48,8 @@ entity main is
 		DMERR_pin : in std_logic; -- Detecor Module Error (DC2)
 		INCOMING_pin : inout std_logic; -- Incoming Message Flag (DC3)
 		RECEIVED_pin : inout std_logic; -- Message Received Flag (DC4)
-		HIDEDM : out std_logic; -- Hide Detector Module Lamps (DC5)
-		SHOWDM : out std_logic; -- Show Detector Module Lamps (DC6)
+		SDI : inout std_logic; -- Serial Data In (DC5)
+		SDO : out std_logic; -- Serial Data Out (DC6)
 		DMCK : out std_logic; -- Demodulator Clock (DC7)
 		
 		TP1, TP2, TP3, TP4 : out std_logic -- Test Point Register
@@ -168,6 +176,10 @@ architecture behavior of main is
 	constant indicators_addr : integer := 32; -- Indicator lamp array (Write)
 	constant indicator_low : integer := 1; -- Low index of CPU-controlled indicators
 	constant indicator_hi : integer := 15; -- High index of CPU-controlled indicators
+	constant dpoc_addr : integer := 128; -- Display Panel Output Control
+	constant dpod_addr : integer := 129; -- Display Panel Output Data
+	constant dpis_addr : integer := 130; -- Display Panel Input Status
+	constant dpid_addr : integer := 131; -- Display Panel Intput Data
 	
 	-- Relay Interface Registers.
 	signal cont_djr : std_logic_vector(7 downto 0); -- Device Job Register
@@ -198,6 +210,11 @@ architecture behavior of main is
 	signal HIDE : boolean := false;
 	signal SHOW : boolean := false;
 	
+-- Display Panel Interface
+	signal DPXMIT : boolean := false; -- Display Panel Data Transmit
+	signal DPRCV : boolean := false; -- Display Panel Data Received
+	signal dp_in, dp_out : std_logic_vector(7 downto 0);
+		
 -- General-Purpose Constant
 	constant max_data_byte : std_logic_vector(7 downto 0) := "11111111";
 	constant high_z_byte : std_logic_vector(7 downto 0) := "ZZZZZZZZ";
@@ -595,6 +612,11 @@ begin
 				cpu_data_in(4 downto 0) <= fifo_byte_count(20 downto 16);
 			when fifo_cnt1_addr => cpu_data_in <= fifo_byte_count(15 downto 8);
 			when fifo_cnt0_addr => cpu_data_in <= fifo_byte_count(7 downto 0);
+			when dpis_addr =>
+				cpu_data_in(7 downto 1) <= "0000000";
+				cpu_data_in(0) <= to_std_logic(DPRCV);
+			when dpid_addr => 
+				cpu_data_in <= dp_in;
 			when others => cpu_data_in <= max_data_byte;
 			end case;
 		when others =>
@@ -621,11 +643,13 @@ begin
 			DMRST <= '1';
 			DJRRST <= false;
 			RCV_RST_CPU <= false;
+			DPXMIT <= false;
 			for i in 1 to 15 loop indicator_control(i) <= '0'; end loop;
 		elsif falling_edge(PCK) then
 			irq_rst <= zero_data_byte;
 			irq_set <= zero_data_byte;
 			DJRRST <= false;
+			DPXMIT <= false;
 			if MWRACK then MWRS <= false; end if;
 			if CPUDS and CPUWR then 
 				if (top_bits >= cpu_ctrl_base) 
@@ -660,6 +684,10 @@ begin
 						when indicators_addr + 1 to indicators_addr + 15 =>
 							indicator_control(to_integer(unsigned(cpu_addr(3 downto 0)))) 
 								<= cpu_data_out(0);
+						when dpoc_addr =>
+							DPXMIT <= true;
+						when dpod_addr =>
+							dp_out <= cpu_data_out;
 					end case;
 				end if;
 			end if;
@@ -862,19 +890,10 @@ begin
 	variable debounce_state : integer range 0 to wait_count := 0;
 	begin
 		if rising_edge(RCK_pin) then
-			if debounce_state = 0 then
-				if switches(3) = '1' then
-					HIDE <= not HIDE;
-					debounce_state := 1;
-				end if;
-			elsif debounce_state = wait_count then
-				if switches(3) = '0' then
-					debounce_state := 0;
-				else
-					debounce_state := wait_count;
-				end if;
+			if switches(3) = '1' then
+				HIDE <= true;
 			else
-				debounce_state := debounce_state + 1;
+				HIDE <= false;
 			end if;
 			indicators(19) <= to_std_logic(not HIDE);
 			
@@ -886,9 +905,6 @@ begin
 			indicators(18) <= to_std_logic(not SHOW); 
 		end if;
 		
-		HIDEDM <= to_std_logic(HIDE);
-		SHOWDM <= to_std_logic(SHOW);
-
 		-- Set the indicator lamps according to the indicator control
 		-- and the HIDE and SHOW signals. The indicator is on when the
 		-- indicator output is LO.
@@ -902,6 +918,29 @@ begin
 			end if;
 		end loop;
 	end process;
+	
+	Display_Panel_Transmitter : process (CK) is 
+	begin
+		if rising_edge(CK) then
+			if DPXMIT then
+				SDO <= to_std_logic(SHOW or (SDI = '1'));
+			else
+				SDO <= to_std_logic(SHOW);
+			end if;
+		end if;
+	end process;
+	
+	Display_Panel_Receiver : process (CK) is
+	begin
+		if rising_edge(CK) then
+			dp_in(7 downto 1) <= dp_in(6 downto 0);
+			dp_in(7) <= SDI;
+			if SDI = '1' then 
+				DPRCV <= true;
+			end if;
+		end if;
+	end process;
+
 	
 	-- Ethernet activity and lamps.
 	EGRN <= '1';
