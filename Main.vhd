@@ -138,7 +138,6 @@ architecture behavior of main is
 
 -- CPU control, interrupt, and error signals.
 	signal CPUIRQ : boolean; -- Interrupt Request
-	signal CPUSTOF : boolean; -- Stack Overflow
 	signal CPUSIG : std_logic_vector(2 downto 0); -- Signals for debugging.
 	signal irq_mask : std_logic_vector(7 downto 0); -- Interrupt Mask
 	signal irq_tmr1_max : std_logic_vector(7 downto 0); -- Interupt Request Period
@@ -340,7 +339,7 @@ begin
 	variable initiate : boolean;
 	begin
 		if rising_edge(CK) then
-			initiate := HWRST or RCV_RST_CPU or RCV_RST_RELAY or CPUSTOF;
+			initiate := HWRST or RCV_RST_CPU or RCV_RST_RELAY;
 			if state = 0 then
 				if initiate then 
 					next_state := 1;
@@ -543,7 +542,6 @@ begin
 		DS => CPUDS,
 		IRQ => CPUIRQ,
 		SIG => CPUSIG,
-		STOF => CPUSTOF,
 		RESET => RESET,
 		CK => PCK);
 	
