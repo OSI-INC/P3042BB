@@ -34,6 +34,10 @@
 -- and RECEIVED and read their current values. Add second interrupt timer for use
 -- by display lamp intensity interrupt.
 
+-- Version A08, [14-SEP-22] Remove STOF so we can compile with OSR8V3. We also edit the
+-- OSR8V3 code so program and cpu addresses are 13 bits by default, to match our existin
+-- code.
+
 
 -- Global constants and types.  
 library ieee;  
