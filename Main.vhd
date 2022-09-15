@@ -83,10 +83,17 @@ entity main is
 		TP1, TP2, TP3, TP4 : out std_logic -- Test Point Register
 	);	
 
-	constant dm_buff_len : integer := 64;
+-- Version numbers.
 	constant hardware_id : integer := 38;
 	constant hardware_version : integer := 2;
 	constant firmware_version : integer := 7;
+
+-- Configuration of OSR8 CPU, RAM, and ROM.
+	constant prog_addr_len : integer := 13;
+	constant cpu_addr_len : integer := 13;
+	constant ram_addr_len : integer := 13;
+	constant start_pc : integer := 0;
+	constant interrupt_pc : integer := 3;
 end;
 
 architecture behavior of main is
@@ -112,7 +119,8 @@ architecture behavior of main is
 	signal PCK : std_logic; -- Processor clock (20 MHz)
 
 -- Detector Modules
-	signal dm_msg_count : integer range 0 to dm_buff_len - 1;
+	constant dm_buff_len : integer := 64;
+	signal dm_msg_count : integer range 0 to dm_buff_len-1;
 	
 -- Message Buffer
 	signal MWRS : boolean; -- Message Write Strobe
@@ -129,12 +137,12 @@ architecture behavior of main is
 
 -- CPU memory access signals.
 	signal prog_data : std_logic_vector(7 downto 0); -- Program memory data bus
-	signal prog_addr : std_logic_vector(12 downto 0); -- Program memory address bus.
-	signal cpu_ram_addr : std_logic_vector(12 downto 0); -- RAM Address
+	signal prog_addr : std_logic_vector(prog_addr_len-1 downto 0); -- Program memory address bus.
+	signal cpu_ram_addr : std_logic_vector(ram_addr_len-1 downto 0); -- RAM Address
 	signal cpu_ram_out, cpu_ram_in : std_logic_vector(7 downto 0); -- RAM Data In and Out
 	signal CPURWR : std_logic; -- CPU Ram Write
 	signal cpu_data_out, cpu_data_in : std_logic_vector(7 downto 0); 
-	signal cpu_addr : std_logic_vector(12 downto 0);
+	signal cpu_addr : std_logic_vector(cpu_addr_len-1 downto 0);
 	attribute syn_keep of cpu_addr : signal is true;
 	attribute nomerge of cpu_addr : signal is "";  
 	signal CPUWR : boolean; -- Write (Not Read)
@@ -536,18 +544,26 @@ begin
         Q => prog_data);
 
 -- The processor itself, and eight-bit microprocessor with thirteen-bit address bus.
-	CPU : entity OSR8_CPU port map (
-		prog_data => prog_data,
-		prog_addr => prog_addr,
-		cpu_data_out => cpu_data_out,
-		cpu_data_in => cpu_data_in,
-		cpu_addr => cpu_addr,
-		WR => CPUWR,
-		DS => CPUDS,
-		IRQ => CPUIRQ,
-		SIG => CPUSIG,
-		RESET => RESET,
-		CK => PCK);
+	CPU : entity OSR8_CPU 
+		generic map (
+			prog_addr_len => prog_addr_len,
+			cpu_addr_len => cpu_addr_len,
+			start_pc => start_pc,
+			interrupt_pc => interrupt_pc
+		)
+		port map (
+			prog_data => prog_data,
+			prog_addr => prog_addr,
+			cpu_data_out => cpu_data_out,
+			cpu_data_in => cpu_data_in,
+			cpu_addr => cpu_addr,
+			WR => CPUWR,
+			DS => CPUDS,
+			IRQ => CPUIRQ,
+			SIG => CPUSIG,
+			RESET => RESET,
+			CK => PCK
+		);
 	
 -- The Memory Manager maps eight-bit read and write access to Detector Module 
 -- daisy chain bus, and the registers of the relay interface, as well as the

@@ -60,8 +60,8 @@ use ieee.numeric_std.all;
 
 entity OSR8_CPU is 
 	generic (
-		prog_addr_len : integer := 13;
-		cpu_addr_len : integer := 13;
+		prog_addr_len : integer := 12;
+		cpu_addr_len : integer := 11;
 		start_pc : integer := 0;
 		interrupt_pc : integer := 3	);
 	port (
