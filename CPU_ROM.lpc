@@ -16,8 +16,8 @@ CoreRevision=5.4
 ModuleName=CPU_ROM
 SourceFormat=VHDL
 ParameterFileVersion=1.0
-Date=09/13/2022
-Time=08:44:44
+Date=09/15/2022
+Time=12:43:18
 
 [Parameters]
 Verilog=0
@@ -37,7 +37,7 @@ Optimization=Speed
 Reset=Sync
 Reset1=Sync
 Init=0
-MemFile=c:/kevan/a3038/p3038bb/cpu.mem
+MemFile=c:/kevan/a3038/p3038bb/cpu_rom.mem
 MemFormat=hex
 EnECC=0
 Pipeline=0
@@ -46,7 +46,7 @@ init_data=0
 no_init=0
 
 [FilesGenerated]
-c:/kevan/a3038/p3038bb/cpu.mem=mem
+c:/kevan/a3038/p3038bb/cpu_rom.mem=mem
 
 [Command]
-cmd_line= -w -n CPU_ROM -lang vhdl -synth lse -bus_exp 7 -bb -arch xo2c00 -type romblk -device LCMXO2-7000HC -addr_width 13 -data_width 8 -num_words 8192 -cascade -1 -memfile "c:/kevan/a3038/p3038bb/cpu.mem" -memformat hex
+cmd_line= -w -n CPU_ROM -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type romblk -device LCMXO2-7000HC -addr_width 13 -data_width 8 -num_words 8192 -cascade -1 -memfile "c:/kevan/a3038/p3038bb/cpu_rom.mem" -memformat hex

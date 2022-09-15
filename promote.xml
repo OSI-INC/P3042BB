@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<userSetting name="C:/Kevan/A3038/P3038BB/promote.xml" version="Diamond (64-bit) 3.12.1.454" date="Thu Sep 15 10:12:52 2022" vendor="Lattice Semiconductor Corporation" >
+<userSetting name="C:/Kevan/A3038/P3038BB/promote.xml" version="Diamond (64-bit) 3.12.1.454" date="Thu Sep 15 12:49:50 2022" vendor="Lattice Semiconductor Corporation" >
   <msg mid="35921504" type="Info" />
   <msg mid="35921033" type="Error" />
   <msg mid="35921288" type="Error" />
-  <msg mid="35921294" type="Error" />
   <msg mid="35921289" type="Error" />
   <msg mid="35931002" type="Warning" />
   <msg mid="35921029" type="Error" />
   <msg mid="35921120" type="Error" />
+  <msg mid="35921294" type="Error" />
   <msg mid="35921040" type="Error" />
   <msg mid="35921205" type="Warning" />
   <msg mid="35921272" type="Error" />

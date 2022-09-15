@@ -99,6 +99,7 @@ const ts_per_bgpwr 64; Timestamp interrupts per background measurement
 const activity_linger 4 ; Timer periods of light per message received
 const flash_linger 200 ; Timer periods for reset flash
 const daisy_chain_delay 10 ; PCK periods for daisy-chain round trip
+const dmrst_length 10 ; PCK periods for reset pulse.
 
 ; Variable Locations.
 const msg_id 0x0000 ; Message ID
@@ -128,27 +129,24 @@ jp interrupt
 ; ------------------------------------------------------------
 initialize:
 
-; If we execute the initialization from re-boot, the stack pointer
-; is reset and the interrupt masks is set to disable all interrupts. 
-; But we may be running this routine with a jump instruction, so we
-; disable interrupts and reset the detector modules. The first thing
-; we do is disable interrupts.
+; Disable interrupts, in case we are running this routine from
+; a jump instruction as a way of re-booting quickly.
 seti
+
+; Initialize the stack pointer.
+ld HL,sp_initial
+ld SP,HL
 
 ; Rising edge on tp_reg(2).
 ld A,(test_point_addr)
 or A,0x04                   
 ld (test_point_addr),A   
 
-; Disable interrupts, cancel interrupt requests, reset detector modules
-; and initialize the stack pointer.
+; Disable interrupts, cancel interrupt requests.
 ld A,0x00            
 ld (irq_mask_addr),A  
 ld A,0xFF              
 ld (irq_reset_addr),A  
-ld (dm_reset_addr),A
-ld HL,sp_initial
-ld SP,HL
 
 ; Select all channels for reception by writing ones to their select bits.
 ld A,0xFF
@@ -163,7 +161,8 @@ dec B
 jp nz,init_channel_select_loop
 
 ; Flash the indicators. We set all the indicator counters to the flash_linger value
-; and so turn on the indicators for flash_linger timer interrupt periods.
+; and so turn on the indicators for flash_linger timer interrupt periods. The flash
+; will start only after we enable interrupts.
 ld IX,zero_channel_timer
 ld A,num_indicators
 push A
@@ -175,13 +174,22 @@ ld (IX),A
 dec B
 jp nz,flash_indicators
 
-; While we have been initializing, the detector module message buffers may have
-; filled up, so we reset the detector modules now. Any write to the reset location
-; will do the job, asserting the detector module reset signal for one CPU clock.
-; period. We reset the clock.
+; Reset the clock.
 ld A,0x00
 ld (clock_hi),A
 ld (clock_lo),A
+
+; If we are initializing after RESET, the detector modules will already be
+; in their reset state because DMRST will be asserted. If we are re-initializing
+; in software, we must set DMRST now to reset the detectors. We wait for some
+; time to allow the reset to complete.
+ld A,0x01
+ld (dm_reset_addr),A
+ld A,dmrst_length
+dly A
+
+; Clear detector modulr reset, DMRST, which allows the detectors to start receiving.
+ld A,0x00
 ld (dm_reset_addr),A
 
 ; Write a zero clock message into the message buffer. We use "nop" instructions
@@ -227,17 +235,22 @@ call store_powers
 ld A,1
 ld (ts_cntr),A
 
-; Set up a interrupt timer, then enable the timer interrupt and the detector 
-; message available interrupt so that we can store timestamps, control the 
-; indicator lamps, and read out messages from the detector modules.
+; Set up a interrupt timer.
 configure_interrupts:
 ld A,rck_per_ts
 ld (irq_tmr1_max_addr),A 
 ld A,rck_per_lamps
 ld (irq_tmr2_max_addr),A 
-ld A,0xFF              
+
+; Reset all interrupts.
+ld A,select_all_code    
 ld (irq_reset_addr),A  
-ld A,0x0B            
+
+; Turn on timer interrupt, receive message interrupt, and lamp interrupts. 
+; Note that interrupts are currently disabled by the I flag.
+ld A,int_ts_mask
+or A,int_rcv_mask
+or A,int_lamps_mask            
 ld (irq_mask_addr),A  
 
 ; Reset the device job register, which tells the Relay that the Controller
@@ -760,10 +773,14 @@ jp int_done
 ; counter by writing to the detectcor module reset location.
 ; --------------------------------------------------------
 int_dmerr:
-ld A,0x01
-ld (dm_reset_addr),A
-ld A,int_dmerr_mask
-ld (irq_reset_addr),A
+ld A,0x01              ; Set bit zero
+ld (dm_reset_addr),A   ; and write to DMRST.
+ld A,dmrst_length      ; Load reset pulse length
+dly A                  ; and wait.
+ld A,0x00              ; Clear bit zero
+ld (dm_reset_addr),A   ; and write to DMRST.
+ld A,int_dmerr_mask    ; Load the dmerr mask and use
+ld (irq_reset_addr),A  ; to reset the dmerr interrupt bit.
 jp int_done
 
 ; --------------------------------------------------------

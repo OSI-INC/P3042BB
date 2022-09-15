@@ -7,6 +7,10 @@
 -- V8.2, 15-SEP-22: Update CPU to OSR8V3. Make aesthetic changes that make 
 -- no difference to functionality. Test and commit.
 
+-- V8.3, 15-SEP-22: Alter Detector Module Reset (DMRST) behavior. Instead of remaining
+-- asserted only for one CPU clock cycle, we now have DMRST set HI or LO by a write to
+-- the dm_reset register. We change the assembler code to write, wait, and write again.
+
 -- Global constants and types.  
 library ieee;  
 use ieee.std_logic_1164.all;
@@ -629,7 +633,6 @@ begin
 		elsif falling_edge(PCK) then
 			irq_rst <= zero_data_byte;
 			irq_set <= zero_data_byte;
-			DMRST <= '0';
 			DJRRST <= false;
 			if MWRACK then MWRS <= false; end if;
 			if CPUDS and CPUWR then 
@@ -646,7 +649,7 @@ begin
 						when msg_write_addr => 
 							mwr_data <= cpu_data_out;
 							MWRS <= true;
-						when dm_reset_addr => DMRST <= '1';
+						when dm_reset_addr => DMRST <= cpu_data_out(0);
 						when dm_complete_addr => DRC <= cpu_data_out(0);
 						when dm_strobe_addr => DSU <= cpu_data_out(0);
 						when relay_djr_rst_addr => DJRRST <= true;
