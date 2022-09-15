@@ -1,7 +1,0 @@
-#Start recording tcl command: 9/15/2022 13:59:59
-#Project Location: C:/Kevan/A3042/P3042BB; Project name: P3042BB
-prj_project open "C:/Kevan/A3042/P3042BB/P3042BB.ldf"
-prj_run Export -impl impl1
-prj_run Export -impl impl1
-prj_project close
-#Stop recording: 9/15/2022 14:12:05
