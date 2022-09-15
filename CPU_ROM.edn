@@ -4,9 +4,9 @@
   (keywordMap (keywordLevel 0))
   (status
     (written
-      (timestamp 2022 9 15 12 43 18)
+      (timestamp 2022 9 15 14 8 9)
       (program "SCUBA" (version "Diamond (64-bit) 3.12.1.454"))))
-      (comment "C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_ROM -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type bram -wp 00 -rp 1100 -addr_width 13 -data_width 8 -num_rows 8192 -cascade -1 -memfile c:/kevan/a3038/p3038bb/cpu_rom.mem -memformat hex ")
+      (comment "C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_ROM -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type bram -wp 00 -rp 1100 -addr_width 13 -data_width 8 -num_rows 8192 -cascade -1 -memfile c:/kevan/a3042/p3042bb/cpu_rom.mem -memformat hex ")
   (library ORCLIB
     (edifLevel 0)
     (technology
@@ -370,9 +370,9 @@
             (property INITVAL_02
               (string "0x1329A04AAC0E4D302C980C0080360206419160DB000080606C09AB11603618C070403E01A8116C36"))
             (property INITVAL_01
-              (string "0x06C1606436064291508108063148600D06204A00162C418A6408ABC0988D0C849158010022108408"))
+              (string "0x06C1606436064291508108063108600D06204A00162C418A6408ABC0988D0C849158010022108408"))
             (property INITVAL_00
-              (string "0x0061916A35022510CE1404CCE01A64138D61280C090800D2060181808C4010201054100B4460EAE4"))
+              (string "0x0061916A35022510CE1404CCE01A64138D61280C090800C2060181808C4010201054100B4460EAE4"))
             (property CSDECODE_B
               (string "0b111"))
             (property CSDECODE_A
@@ -750,9 +750,9 @@
             (property INITVAL_02
               (string "0x08020190080001008000000340880004025000100181008040002010000400004030880100004020"))
             (property INITVAL_01
-              (string "0x04020000200402204401008400000000000000010081102210020111FEC1100480622010E080403A"))
+              (string "0x04020000200402204401008400400000000000010081102210020111FEC1100480622010E080403A"))
             (property INITVAL_00
-              (string "0x01840100040800400849100081028002810008080483000000000000080000886012011840008000"))
+              (string "0x01840100040800400849100081028002810008080483001000000000080000886012011840008000"))
             (property CSDECODE_B
               (string "0b111"))
             (property CSDECODE_A

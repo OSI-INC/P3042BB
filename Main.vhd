@@ -1,15 +1,7 @@
 -- <pre> ALT Base Board (A3038BB) Controller Firmware, Toplevel Unit
 -- Repository https://github.com/OSI-INC/P3038BB. 
 
--- V8.1, 14-SEP-22: Create Git repository. Compile and test, same functionality as
--- pre-repository version A07.
-
--- V8.2, 15-SEP-22: Update CPU to OSR8V3. Make aesthetic changes that make 
--- no difference to functionality. Test and commit.
-
--- V8.3, 15-SEP-22: Alter Detector Module Reset (DMRST) behavior. Instead of remaining
--- asserted only for one CPU clock cycle, we now have DMRST set HI or LO by a write to
--- the dm_reset register. We change the assembler code to write, wait, and write again.
+-- V1.1, 15-SEP-22: Based upon P3038BB v8.3.
 
 -- Global constants and types.  
 library ieee;  
@@ -56,9 +48,9 @@ entity main is
 	);	
 
 -- Version numbers.
-	constant hardware_id : integer := 38;
-	constant hardware_version : integer := 2;
-	constant firmware_version : integer := 7;
+	constant hardware_id : integer := 42;
+	constant hardware_version : integer := 0;
+	constant firmware_version : integer := 1;
 
 -- Configuration of OSR8.
 	constant prog_addr_len : integer := 13;

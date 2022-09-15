@@ -1,14 +1,13 @@
-; Animal Location Tracker Baseboard Program BB07A
-; -----------------------------------------------
+; Telemetry Control Box Baseboard Program
+; ---------------------------------------
 
 ; ------------------------------------------------------------
 ;                        CONSTANTS
 ; ------------------------------------------------------------
 
 ; Receiver type code, to which we add the firmware version 
-; to generate the receiver version. For A3038 receivers
-; the receiver version is ninety plus the firmware version.
-const receiver_type 90
+; to generate the receiver version. 
+const receiver_type 120 ; For A3042 receivers.
 
 ; Control Register Addresses.
 const irq_bits_addr 0x1E00 ; Interrupt Request Bits (Read)

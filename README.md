@@ -1,2 +1,2 @@
-# P3041
-Animal Location Tracker Base Board ([A3038BB](https://www.opensourceinstruments.com/Electronics/A3038/M3038.html)) Firmware and Software
+# P3042BB
+Telemetry Control Box Base Board ([A3042BB](https://www.opensourceinstruments.com/Electronics/A3042/M3042.html)) Firmware and Software
