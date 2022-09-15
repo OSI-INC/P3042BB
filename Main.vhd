@@ -34,9 +34,8 @@
 -- and RECEIVED and read their current values. Add second interrupt timer for use
 -- by display lamp intensity interrupt.
 
--- Version A08, [14-SEP-22] Remove STOF so we can compile with OSR8V3. We also edit the
--- OSR8V3 code so program and cpu addresses are 13 bits by default, to match our existin
--- code.
+-- Version A08, [15-SEP-22] Update to OSR8V3. Make numerous aesthetic changes that make 
+-- no difference to functionality. Test and commit.
 
 
 -- Global constants and types.  
@@ -88,7 +87,7 @@ entity main is
 	constant hardware_version : integer := 2;
 	constant firmware_version : integer := 7;
 
--- Configuration of OSR8 CPU, RAM, and ROM.
+-- Configuration of OSR8.
 	constant prog_addr_len : integer := 13;
 	constant cpu_addr_len : integer := 13;
 	constant ram_addr_len : integer := 13;
@@ -420,7 +419,7 @@ begin
 	variable write_ptr, next_write_ptr : std_logic_vector(20 downto 0);
 	variable read_ptr, next_read_ptr : std_logic_vector(20 downto 0);
 	variable state, next_state : integer range 0 to 7;
-	variable REN, RWE : boolean;
+	variable buff_enable, buff_write : boolean;
 	begin
 		if (RESET = '1') then
 			write_ptr := std_logic_vector(to_unsigned(0,21));
@@ -428,8 +427,8 @@ begin
 			fifo_byte_count <= std_logic_vector(to_unsigned(0,21));
 			buff_data <= high_z_byte;
 			mrd_data <= max_data_byte;
-			REN := false;
-			RWE := false;
+			buff_enable := false;
+			buff_write := false;
 			MWRACK <= false;
 			MRDACK <= false;
 		elsif rising_edge(CK) then
@@ -443,47 +442,47 @@ begin
 					if MWRS and (not MWRACK) then 
 						buff_addr <= write_ptr;
 						buff_data <= mwr_data;
-						REN := false;
-						RWE := true;
+						buff_enable := false;
+						buff_write := true;
 						next_state := 1; 
 					elsif MRDS and (not MRDACK) then
 						if to_integer(unsigned(fifo_byte_count)) /= 0 then
 							buff_addr <= read_ptr;
 							buff_data <= high_z_byte;
-							REN := true;
-							RWE := false;
+							buff_enable := true;
+							buff_write := false;
 							next_state := 4;
 						else
 							buff_addr <= read_ptr;
 							buff_data <= high_z_byte;
-							REN := false;
-							RWE := false;
+							buff_enable := false;
+							buff_write := false;
 							next_state := 0;
 						end if;
 					else
 						buff_addr <= read_ptr;
 						buff_data <= high_z_byte;
-						REN := false;
-						RWE := false;
+						buff_enable := false;
+						buff_write := false;
 						next_state := 0;					
 					end if;
 				when 1 =>
 					buff_addr <= write_ptr;
 					buff_data <= mwr_data;
-					REN := true;
-					RWE := true;
+					buff_enable := true;
+					buff_write := true;
 					next_state := 2;
 				when 2 =>
 					buff_addr <= write_ptr;
 					buff_data <= mwr_data;
-					REN := false;
-					RWE := true;
+					buff_enable := false;
+					buff_write := true;
 					next_state := 3;
 				when 3 =>
 					buff_addr <= write_ptr;
 					buff_data <= mwr_data;
-					REN := false;
-					RWE := false;
+					buff_enable := false;
+					buff_write := false;
 					MWRACK <= true;
 					next_write_ptr := std_logic_vector(unsigned(write_ptr) + 1);
 					fifo_byte_count <= std_logic_vector(unsigned(fifo_byte_count) + 1);
@@ -492,14 +491,14 @@ begin
 					buff_addr <= read_ptr;
 					buff_data <= high_z_byte;
 					mrd_data <= buff_data;
-					REN := true;
-					RWE := false;
+					buff_enable := true;
+					buff_write := false;
 					next_state := 5;
 				when 5 =>
 					buff_addr <= read_ptr;
 					buff_data <= high_z_byte;
-					REN := false;
-					RWE := false;
+					buff_enable := false;
+					buff_write := false;
 					MRDACK <= true;
 					next_read_ptr := std_logic_vector(unsigned(read_ptr) + 1);
 					fifo_byte_count <= std_logic_vector(unsigned(fifo_byte_count) - 1);
@@ -507,8 +506,8 @@ begin
 				when others =>
 					buff_addr <= read_ptr;
 					buff_data <= high_z_byte;
-					REN := false;
-					RWE := false;
+					buff_enable := false;
+					buff_write := false;
 					next_state := 0;
 			end case;
 			state := next_state;
@@ -516,8 +515,8 @@ begin
 			write_ptr := next_write_ptr;
 		end if;
 		
-		REN_not <= to_std_logic(not REN);
-		RWE_not <= to_std_logic(not RWE);
+		REN_not <= to_std_logic(not buff_enable);
+		RWE_not <= to_std_logic(not buff_write);
 	end process;
 	
 -- User memory and configuration code for the CPU. This RAM will be initialized at
