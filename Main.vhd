@@ -1,42 +1,11 @@
 -- <pre> ALT Base Board (A3038BB) Controller Firmware, Toplevel Unit
+-- Repository https://github.com/OSI-INC/P3038BB. 
 
--- Version A01, 22-APR-21. We have all inputs and outputs defined and draft code for all 
--- functions. We test CPU with lamps by running a program that makes the white lamps wax 
--- and wane.  We can read the test point register, which makes it possible to change only 
--- one bit at a time.
+-- V8.1, 14-SEP-22: Create Git repository. Compile and test, same functionality as
+-- pre-repository version A07.
 
--- Version A02, 30-APR-21. We make the interrupt counter a global signal and allow the 
--- CPU to read it back, for use as our message timestamp. Add relay interface with locations
--- for job, command, status, and other standard locations. These map into both the CPU
--- and the relay address spaces.
-
--- Version A03, 05-MAY-21. We debug the message counter and implement an interrupt for
--- message counter non-zero.
-
--- Version A04, [13-MAY-21] Fix RESET arbitration so the CPU does not get stuck in reset
--- after it writes to its self-reset register. Fix Message Buffer Controller handshake
--- implementation. Add CPU stack overflow flag to reset conditions. The resulting code
--- runs perfectly with the Recorder Instrument, providing SCT messages with data and clocks,
--- although our CPU code does not yet include the power measurement payload. Remaining
--- problems in the code are timing violations that we have to overlook, and if we run
--- the CPU RAM off !PCK rather than !CK, the code asserts RESET every 10 ms for reasons we 
--- are unable to determine. So we leave CPU RAM on !CK for the final version of A04.
-
--- Version A05, [01-JUN-21] Disable output registers on CPU RAM and our firmware now
--- acts as we expect, with the MMU, RAM and ROM running of !PCK. Add reset of irq_set
--- and irq_rst bits on RESET. Provide DMCK of 8 MHz for detector modules. Increment
--- available message counter on falling edge of DMRCV.
-
--- Version A06, [18-JUN-21] Add PLL to generate 80 MHz from 10 MHz. Add debounce to 
--- falling edge of RECEIVER_pin.
-
--- Version A07, [19-AUG-21] Add locations in CPU memory where we can assert INCOMING
--- and RECEIVED and read their current values. Add second interrupt timer for use
--- by display lamp intensity interrupt.
-
--- Version A08, [15-SEP-22] Update to OSR8V3. Make numerous aesthetic changes that make 
+-- V8.2, 15-SEP-22: Update CPU to OSR8V3. Make aesthetic changes that make 
 -- no difference to functionality. Test and commit.
-
 
 -- Global constants and types.  
 library ieee;  
