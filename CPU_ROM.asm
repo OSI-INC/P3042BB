@@ -41,6 +41,12 @@ const irq_tmr2_max_addr 0x1E1B ; Interrupt Timer Two Period Minus One (Read/Writ
 const irq_tmr2_addr 0x1E1C ; Interrupt Counter Value (Read)
 const fv_addr 0x1E1D ; Firmware Version number (Read)
 const zero_indicator_addr 0x1E20 ; Zero channel indicator (Write)
+const dpoc_addr 0x1E40 ; Display Panel Output Control
+const dpod_addr 0x1E41 ; -- Display Panel Output Data
+const dpis_addr 0x1E42 ; -- Display Panel Input Status
+const dpid_addr 0x1E43 ; -- Display Panel Input Data
+const dpir_addr 0x1E44 ; -- Display Panel Input Read
+
 
 ; Controller job numbers.
 const read_job 3
@@ -708,6 +714,15 @@ ld (msg_write_addr),A
 ; recorded in the dm_pwr array.
 ld HL,dm_pwr
 call store_powers
+
+; Transmit a message to the display panel. The eight-bit message consists
+; of an operation code in the top four bits with value 0x1 and the lower
+; four bits of the message identifier.
+ld A,(msg_id)
+and A,0x0F
+or A,0x10
+ld (dpod_addr),A
+ld (dpoc_addr),A
 
 ; Reset the receiver interrupt.
 int_rcv_done:

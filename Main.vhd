@@ -3,12 +3,14 @@
 
 -- V1.1, 15-SEP-22: Based upon P3038BB v8.3.
 
--- V1.2, 15-SEP-22: Use DC5 and DC6 for communiation with display
+-- V1.2, 16-SEP-22: Use DC5 and DC6 for communiation with display
 -- panel. We use DC6 for Serial Data Out (SDO) and DC5 for Serial-- Data In (SDI). These signals are SHOW and HIDE on the detector
--- modules, so communication will cause some flickering of the lights
--- on the detectors. The HIDE switch will have no effect on detectors
--- but the SHOW will stop SDO and turn on all the lights. The CPU can
--- send serial bytes at 1 Mbps by writing to the sdo_register in memory. 
+-- modules. The HIDE switch will have no effect on detectors any 
+-- more, but SHOW will still show the lights. The CPU sends and 
+-- receives serial bytes through the display panel registers. Add 
+-- reset value high-impedance for RECEIVED_pin and INCOMING_pin. 
+-- Prior ommission of explicit reset values was causing RECEIVED_pin 
+-- to be driven HI by the base board, stopping all detector readout. 
 
 
 -- Global constants and types.  
@@ -177,10 +179,11 @@ architecture behavior of main is
 	constant indicators_addr : integer := 32; -- Indicator lamp array (Write)
 	constant indicator_low : integer := 1; -- Low index of CPU-controlled indicators
 	constant indicator_hi : integer := 15; -- High index of CPU-controlled indicators
-	constant dpoc_addr : integer := 128; -- Display Panel Output Control
-	constant dpod_addr : integer := 129; -- Display Panel Output Data
-	constant dpis_addr : integer := 130; -- Display Panel Input Status
-	constant dpid_addr : integer := 131; -- Display Panel Intput Data
+	constant dpoc_addr : integer := 64; -- Display Panel Output Control
+	constant dpod_addr : integer := 65; -- Display Panel Output Data
+	constant dpis_addr : integer := 66; -- Display Panel Input Status
+	constant dpid_addr : integer := 67; -- Display Panel Input Data
+	constant dpir_addr : integer := 68; -- Display Panel Input Read
 	
 	-- Relay Interface Registers.
 	signal cont_djr : std_logic_vector(7 downto 0); -- Device Job Register
@@ -214,6 +217,7 @@ architecture behavior of main is
 -- Display Panel Interface
 	signal DPXMIT : boolean := false; -- Display Panel Data Transmit
 	signal DPRCV : boolean := false; -- Display Panel Data Received
+	signal DPIR : boolean := false; -- Display Panel Input Read
 	signal dp_in, dp_out : std_logic_vector(7 downto 0);
 		
 -- General-Purpose Constant
@@ -654,17 +658,22 @@ begin
 			irq_mask <= zero_data_byte;
 			irq_rst <= zero_data_byte;
 			irq_set <= zero_data_byte;
+			dp_out <= zero_data_byte;
 			MWRS <= false;
 			DMRST <= '1';
 			DJRRST <= false;
 			RCV_RST_CPU <= false;
 			DPXMIT <= false;
+			DPIR <= false;
+			INCOMING_pin <= 'Z';
+			RECEIVED_pin <= 'Z';
 			for i in 1 to 15 loop indicator_control(i) <= '0'; end loop;
 		elsif falling_edge(PCK) then
 			irq_rst <= zero_data_byte;
 			irq_set <= zero_data_byte;
 			DJRRST <= false;
 			DPXMIT <= false;
+			DPIR <= false;
 			if MWRACK then MWRS <= false; end if;
 			if CPUDS and CPUWR then 
 				if (top_bits >= cpu_ctrl_base) 
@@ -699,10 +708,9 @@ begin
 						when indicators_addr + 1 to indicators_addr + 15 =>
 							indicator_control(to_integer(unsigned(cpu_addr(3 downto 0)))) 
 								<= cpu_data_out(0);
-						when dpoc_addr =>
-							DPXMIT <= true;
-						when dpod_addr =>
-							dp_out <= cpu_data_out;
+						when dpoc_addr => DPXMIT <= true;
+						when dpod_addr => dp_out <= cpu_data_out;
+						when dpir_addr => DPIR <= true;
 					end case;
 				end if;
 			end if;
@@ -934,6 +942,24 @@ begin
 		end loop;
 	end process;
 	
+	-- The Display Panel Transmitter sends messages to the display panel
+	-- using SDO. When the CPU asserts DPXMIT for one CK cycle (50 ns),
+	-- the Display Panel Transmitter responds by transmitting the eight
+	-- bytes of the dp_out register at 1 Mbps. The SDO signal is usually
+	-- LO, so we begin with 2 us of guaranteed LO for set-up, then a 1-us 
+	-- HI for a start bit, and the eight data bits, 1 us each. We end with
+	-- a 1-us HI for a stop bit. The SDO signal used to be called SHOWDM on 
+	-- the ALT Base Board, and on the detector modules it still serves the 
+	-- SHOW function to turn on all the lights. We preserve this function 
+	-- now by asserting SDO when the SHOW button is pressed on the base 
+	-- board. We are still able to transmit, but SHOW keeps SDO HI after 
+	-- each transmission until the next. The transmitter remains in its
+	-- stop bit state until DPXMIT is asserted again, when it immediately
+	-- embarks upon another transmission. Because the transmitter resets
+	-- to its start state on RESET, the transmitter will transmit a zerop
+	-- byte immediately after reset. The CPU asserts DPXMIT for one CK
+	-- cycle by writing any value to the Display Panel Output Control 
+	-- Register (dpoc_addr).
 	Display_Panel_Transmitter : process (SCK,DPXMIT) is 
 	variable state : integer range 0 to 31;
 	begin
@@ -963,8 +989,8 @@ begin
 				when 19 => SDO <= dp_out(1);
 				when 20 => SDO <= dp_out(0);
 				when 21 => SDO <= dp_out(0);
-				when 22 => SDO <= '1';
-				when 23 => SDO <= '1';
+				when 22 => SDO <= to_std_logic(SHOW);
+				when 23 => SDO <= to_std_logic(SHOW);
 				when 24 => SDO <= to_std_logic(SHOW);
 			end case;
 			if state < 24 then 
@@ -975,7 +1001,11 @@ begin
 		end if;
 	end process;
 	
-	Display_Panel_Receiver : process (SCK) is
+	-- The Display Panel Receiver receivers eight-bit messages from the
+	-- display panel. When it receives a message, it asserts Display
+	-- Panel Received (DPRCV). When it sees Display Panel Input Read
+	-- (DPIR), it returns to its rest state. 
+	Display_Panel_Receiver : process (SCK,DPIR) is
 	variable state,next_state : integer range 0 to 31;
 	variable RSDI, FSDI : std_logic;
 	begin
@@ -986,10 +1016,19 @@ begin
 			RSDI := SDI;
 		end if;
 		
-		if (RESET = '1') then
+		if (RESET = '1') or DPIR then
 			state := 0;
 			DPRCV <= false;
+			dp_in <= zero_data_byte;
 		elsif rising_edge(SCK) then
+			if state = 3 then dp_in(7) <= RSDI; end if;
+			if state = 5 then dp_in(6) <= RSDI; end if;
+			if state = 7 then dp_in(5) <= RSDI; end if;
+			if state = 9 then dp_in(4) <= RSDI; end if;
+			if state = 11 then dp_in(3) <= RSDI; end if;
+			if state = 13 then dp_in(2) <= RSDI; end if;
+			if state = 15 then dp_in(1) <= RSDI; end if;
+			if state = 17 then dp_in(0) <= RSDI; end if;
 			next_state := state + 1;
 			if state = 0 then
 				DPRCV <= false;
@@ -999,14 +1038,6 @@ begin
 				DPRCV <= true;
 				next_state := state;
 			end if;
-			if state = 3 then dp_in(7) <= RSDI; end if;
-			if state = 5 then dp_in(6) <= RSDI; end if;
-			if state = 7 then dp_in(5) <= RSDI; end if;
-			if state = 9 then dp_in(4) <= RSDI; end if;
-			if state = 11 then dp_in(3) <= RSDI; end if;
-			if state = 13 then dp_in(2) <= RSDI; end if;
-			if state = 15 then dp_in(1) <= RSDI; end if;
-			if state = 17 then dp_in(0) <= RSDI; end if;
 			state := next_state;
 		end if;
 	end process;
