@@ -89,6 +89,7 @@ architecture behavior of main is
 	signal FCK : std_logic; -- Fast Clock (80 MHz)
 	signal CK : std_logic; -- State machine clock (40 MHz)
 	signal PCK : std_logic; -- Processor clock (20 MHz)
+	signal SCK : std_logic; -- Serial clock (2 MHz)
 
 -- Detector Modules
 	constant dm_buff_len : integer := 64;
@@ -240,6 +241,7 @@ begin
 	Divider : process (FCK) is
 	variable p_count : integer range 0 to 3;
 	variable d_count : integer range 0 to 15;
+	variable s_count : integer range 0 to 63;
 	begin
 		if rising_edge(FCK) then
 			CK <= to_std_logic(CK = '0');
@@ -265,6 +267,19 @@ begin
 				d_count := 0;
 			else
 				d_count := d_count + 1;
+			end if;
+		end if;
+		
+		if rising_edge(FCK) then
+			if (s_count <= 20) then
+				SCK <= '0';
+			else
+				SCK <= '1';
+			end if;
+			if (s_count = 39) then
+				s_count := 0;
+			else
+				s_count := s_count + 1;
 			end if;
 		end if;
 	end process;
@@ -919,28 +934,82 @@ begin
 		end loop;
 	end process;
 	
-	Display_Panel_Transmitter : process (CK) is 
+	Display_Panel_Transmitter : process (SCK,DPXMIT) is 
+	variable state : integer range 0 to 31;
 	begin
-		if rising_edge(CK) then
-			if DPXMIT then
-				SDO <= to_std_logic(SHOW or (SDI = '1'));
+		if (RESET = '1') or DPXMIT then
+			state := 0;
+		elsif rising_edge(SCK) then
+			case state is
+				when 0 => SDO <= '0';
+				when 1 => SDO <= '0';
+				when 2 => SDO <= '0';
+				when 3 => SDO <= '0';
+				when 4 => SDO <= '1';
+				when 5 => SDO <= '1';
+				when 6 => SDO <= dp_out(7);
+				when 7 => SDO <= dp_out(7);
+				when 8 => SDO <= dp_out(6);
+				when 9 => SDO <= dp_out(6);
+				when 10 => SDO <= dp_out(5);
+				when 11 => SDO <= dp_out(5);
+				when 12 => SDO <= dp_out(4);
+				when 13 => SDO <= dp_out(4);
+				when 14 => SDO <= dp_out(3);
+				when 15 => SDO <= dp_out(3);
+				when 16 => SDO <= dp_out(2);
+				when 17 => SDO <= dp_out(2);
+				when 18 => SDO <= dp_out(1);
+				when 19 => SDO <= dp_out(1);
+				when 20 => SDO <= dp_out(0);
+				when 21 => SDO <= dp_out(0);
+				when 22 => SDO <= '1';
+				when 23 => SDO <= '1';
+				when 24 => SDO <= to_std_logic(SHOW);
+			end case;
+			if state < 24 then 
+				state := state + 1;
 			else
-				SDO <= to_std_logic(SHOW);
+				state := 24;
 			end if;
 		end if;
 	end process;
 	
-	Display_Panel_Receiver : process (CK) is
+	Display_Panel_Receiver : process (SCK) is
+	variable state,next_state : integer range 0 to 31;
+	variable RSDI, FSDI : std_logic;
 	begin
-		if rising_edge(CK) then
-			dp_in(7 downto 1) <= dp_in(6 downto 0);
-			dp_in(7) <= SDI;
-			if SDI = '1' then 
-				DPRCV <= true;
+		if falling_edge(SCK) then
+			FSDI := SDI;
+		end if;
+		if rising_edge(SCK) then
+			RSDI := SDI;
+		end if;
+		
+		if (RESET = '1') then
+			state := 0;
+			DPRCV <= false;
+		elsif rising_edge(SCK) then
+			next_state := state + 1;
+			if state = 0 then
+				DPRCV <= false;
+				if (FSDI = '0') then next_state := 0; end if;
 			end if;
+			if state = 24 then
+				DPRCV <= true;
+				next_state := state;
+			end if;
+			if state = 3 then dp_in(7) <= RSDI; end if;
+			if state = 5 then dp_in(6) <= RSDI; end if;
+			if state = 7 then dp_in(5) <= RSDI; end if;
+			if state = 9 then dp_in(4) <= RSDI; end if;
+			if state = 11 then dp_in(3) <= RSDI; end if;
+			if state = 13 then dp_in(2) <= RSDI; end if;
+			if state = 15 then dp_in(1) <= RSDI; end if;
+			if state = 17 then dp_in(0) <= RSDI; end if;
+			state := next_state;
 		end if;
 	end process;
-
 	
 	-- Ethernet activity and lamps.
 	EGRN <= '1';
