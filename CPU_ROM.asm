@@ -186,8 +186,8 @@ ld (clock_lo),A
 
 ; If we are initializing after RESET, the detector modules will already be
 ; in their reset state because DMRST will be asserted. If we are re-initializing
-; in software, we must set DMRST now to reset the detectors. We wait for some
-; time to allow the reset to complete.
+; in software, howerver, we must set DMRST now to reset the detectors. We wait 
+; for some time to allow the reset to complete.
 ld A,0x01
 ld (dm_reset_addr),A
 ld A,dmrst_length
@@ -196,6 +196,11 @@ dly A
 ; Clear detector modulr reset, DMRST, which allows the detectors to start receiving.
 ld A,0x00
 ld (dm_reset_addr),A
+
+; Make sure we are not asserting INCOMING or RECEIVED.
+ld A,0x00
+ld (incoming_addr),A
+ld (received_addr),A
 
 ; Write a zero clock message into the message buffer. We use "nop" instructions
 ; as a delay between writes to the message buffer so as to allow the buffer time
