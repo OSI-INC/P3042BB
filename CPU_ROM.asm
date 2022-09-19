@@ -47,7 +47,6 @@ const dpis_addr 0x1E42 ; -- Display Panel Input Status
 const dpid_addr 0x1E43 ; -- Display Panel Input Data
 const dpir_addr 0x1E44 ; -- Display Panel Input Read
 
-
 ; Controller job numbers.
 const read_job 3
 const command_job 10
@@ -323,15 +322,17 @@ jp z,msg_select
 ld (cpu_rst_addr),A
 wait
 
+; ----------------------------------------------------------------------
+; Message Select Command. We interpret the command and modify the message
+; selection array accordingly.
+; ----------------------------------------------------------------------
+
 msg_select:
 ld A,(relay_crlo_addr)
 and A,sel_bit_mask
 jp z,other_commands
 
-; ----------------------------------------------------------------------
-; Message Select Command. We interpret the command and modify the message
-; selection array accordingly.
-; ----------------------------------------------------------------------
+; Check the message select code.
 ld A,(relay_crhi_addr)
 sub A,select_none_code
 jp z,select_none
