@@ -228,10 +228,9 @@ ld (irq_tmr2_max_addr),A
 ld A,select_all_code    
 ld (irq_reset_addr),A  
 
-; Turn on timer interrupt, message ready interrupt, and lamp interrupts. 
-; Note that interrupts are currently disabled by the I flag.
+; Turn on timer interrupt and lamp interrupts. Interrupts are currently 
+; disabled by the I flag.
 ld A,int_ts_mask
-or A,int_mrdy_mask
 or A,int_lamps_mask            
 ld (irq_mask_addr),A  
 
@@ -262,6 +261,12 @@ main:
 ld A,(test_point_addr)
 or A,0x01                    
 ld (test_point_addr),A   
+
+ld A,(dm_mrdy_addr)
+and A,0x01
+jp z,no_messages
+call read_message
+no_messages:
 
 ; ---------------------------------------------------------------
 ; Check the Device Job Register. If it's not zero, take action and 
@@ -430,9 +435,6 @@ ld A,(irq_bits_addr)
 and A,int_ts_mask
 jp nz,int_ts
 ld A,(irq_bits_addr)
-and A,int_mrdy_mask
-jp nz,int_rcv
-ld A,(irq_bits_addr)
 and A,int_lamps_mask
 jp nz,int_lamps
 ld A,(irq_bits_addr)
@@ -443,9 +445,7 @@ ld (irq_reset_addr),A
 jp int_done
 
 ; ---------------------------------------------------------
-; Generate a timestamp message, store in message buffer along
-; with background powers. Sometimes, we initiate a background
-; power measurement.
+; Generate a timestamp message, store in message buffer.
 ;----------------------------------------------------------
 int_ts:
 
@@ -483,156 +483,6 @@ ld (msg_write_addr),A
 ; Reset the timestamp interrupt.
 int_ts_done:
 ld A,int_ts_mask             
-ld (irq_reset_addr),A  
-jp int_done
-
-; --------------------------------------------------------------
-; Read out the detector modules using the daisy chain bus. If the
-; channel is selected for storage, activate a channel activity lamp 
-; and store the message in the message buffer. 
-; --------------------------------------------------------------
-int_rcv:
-
-; We start by asserting Detector Module Read Control (DMRC) to
-; start the read cycle. We wait a while to allow the daisy chain
-; data strobe lines to settle.
-ld A,0x01               
-ld (dm_rc_addr),A
-ld A,daisy_chain_delay
-dly A
-
-; Read the channel ID.
-ld A,0x01               
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-ld A,(dm_data_addr)
-ld (msg_id),A
-ld A,0x00
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-
-; Check that this channel is among those enabled by the channel select
-; array. If not, set the message_id to zero and terminate the readout.
-ld HL,zero_channel_select
-push H
-ld A,(msg_id)
-push A
-pop IX
-ld A,(IX)
-sub A,0x00
-jp nz,int_continue_read
-ld A,0x00
-ld (msg_id),A
-jp dm_drc
-
-; Read the HI data byte.
-int_continue_read:
-ld A,0x01               
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-ld A,(dm_data_addr)
-ld (msg_hi),A
-ld A,0x00
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-
-; Read the LO data byte.
-ld A,0x01               
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-ld A,(dm_data_addr)
-ld (msg_lo),A
-ld A,0x00
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-
-; Read the detector power.
-ld A,0x01               
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-ld A,(dm_data_addr)
-ld (msg_pwr),A
-ld A,0x00
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-
-; Read the antenna number.
-ld A,0x01               
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-ld A,(dm_data_addr)
-ld (msg_an),A
-ld A,0x00
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-
-; Unassert Detector Module Read Control
-dm_drc:
-ld A,0x00               
-ld (dm_rc_addr),A
-
-; Check again to see if the message id is zero, and if so, we are done.
-ld A,(msg_id)
-add A,0x00
-jp z,int_mrdy_done
-
-; Set the channel indicator timer. We use the lower four bits of
-; the channel ID to select one of the fifteen indicator lamps.
-ld HL,zero_channel_timer
-push H
-ld A,(msg_id)
-and A,0x0F
-push A
-pop IX
-ld A,activity_linger
-ld (IX),A
-
-; Store the message in the buffer. We pay particular attention to the
-; value of the timestamp. While we were reading out the detector 
-; modules, the timestamp may have incremented from 255 to 0 or 1, without
-; any opportunity to store a clock message in the buffer. The timer
-; interrupt bit will be set if and only if the timestamp has incremented
-; without a clock message being stored, so we check this bit, and if it
-; is set, we store 255 for the timestamp rather than the current value of
-; the interrupt timer.
-ld A,(msg_id)
-ld (msg_write_addr),A
-ld A,(msg_hi)
-ld (msg_write_addr),A
-ld A,(msg_lo)
-ld (msg_write_addr),A
-ld A,(irq_bits_addr)
-and A,0x01
-jp z,int_mrdy_ts
-ld A,255
-jp int_mrdy_stts
-int_mrdy_ts:
-ld A,(irq_tmr1_addr)
-int_mrdy_stts:
-ld (msg_write_addr),A
-
-; Transmit a message to the display panel. The eight-bit message consists
-; of an operation code in the top four bits with value 0x1 and the lower
-; four bits of the message identifier.
-ld A,(msg_id)
-and A,0x0F
-or A,0x10
-ld (dpod_addr),A
-ld (dpoc_addr),A
-
-; Reset the receiver interrupt.
-int_mrdy_done:
-ld A,int_mrdy_mask             
 ld (irq_reset_addr),A  
 jp int_done
 
@@ -728,9 +578,188 @@ rti
 ;                        SUBROUTINES
 ; -------------------------------------------------------------
 
+
 ; Calling convention: calling process pushes anything it wants
 ; protected onto the stack before calling, and pops upon return.
 
+; --------------------------------------------------------------
+; Read a message from the detector module daisy chain, enable
+; a channel activity lamp and store the message in the message
+; buffer with a timestamp.
+; --------------------------------------------------------------
+read_message:
+
+; Push all the flags and registers onto the stack so we don't
+; have to worry about which ones we use in the interrupt.
+push F 
+push A
+push B
+push C
+push D
+push E
+push H
+push L
+push IX
+push IY
+
+; Assert Detector Module Read Control (DMRC) to start the read cycle. 
+; We wait a while to allow the daisy chain data strobe lines to settle.
+ld A,0x01               
+ld (dm_rc_addr),A
+ld A,daisy_chain_delay
+dly A
+
+; Read the channel ID.
+ld A,0x01               
+ld (dm_strobe_addr),A
+ld A,daisy_chain_delay
+dly A
+ld A,(dm_data_addr)
+ld (msg_id),A
+ld A,0x00
+ld (dm_strobe_addr),A
+ld A,daisy_chain_delay
+dly A
+
+; If the message ID is zero, abandon the read: this message is invalid.
+ld A,(msg_id)
+add A,0x00
+jp z,dm_drc
+
+; Check that this channel is among those enabled by the channel select
+; array. If not, set the message_id to zero and terminate the readout.
+ld HL,zero_channel_select
+push H
+ld A,(msg_id)
+push A
+pop IX
+ld A,(IX)
+sub A,0x00
+jp nz,int_continue_read
+ld A,0x00
+ld (msg_id),A
+jp dm_drc
+
+; Read the HI data byte.
+int_continue_read:
+ld A,0x01               
+ld (dm_strobe_addr),A
+ld A,daisy_chain_delay
+dly A
+ld A,(dm_data_addr)
+ld (msg_hi),A
+ld A,0x00
+ld (dm_strobe_addr),A
+ld A,daisy_chain_delay
+dly A
+
+; Read the LO data byte.
+ld A,0x01               
+ld (dm_strobe_addr),A
+ld A,daisy_chain_delay
+dly A
+ld A,(dm_data_addr)
+ld (msg_lo),A
+ld A,0x00
+ld (dm_strobe_addr),A
+ld A,daisy_chain_delay
+dly A
+
+; Read the detector power.
+ld A,0x01               
+ld (dm_strobe_addr),A
+ld A,daisy_chain_delay
+dly A
+ld A,(dm_data_addr)
+ld (msg_pwr),A
+ld A,0x00
+ld (dm_strobe_addr),A
+ld A,daisy_chain_delay
+dly A
+
+; Read the antenna number.
+ld A,0x01               
+ld (dm_strobe_addr),A
+ld A,daisy_chain_delay
+dly A
+ld A,(dm_data_addr)
+ld (msg_an),A
+ld A,0x00
+ld (dm_strobe_addr),A
+ld A,daisy_chain_delay
+dly A
+
+; Unassert Detector Module Read Control
+dm_drc:
+ld A,0x00               
+ld (dm_rc_addr),A
+
+; Check again to see if the message id is zero, and if so, we are done.
+ld A,(msg_id)
+add A,0x00
+jp z,read_message_done
+
+; Set the channel indicator timer. We use the lower four bits of
+; the channel ID to select one of the fifteen indicator lamps.
+ld HL,zero_channel_timer
+push H
+ld A,(msg_id)
+and A,0x0F
+push A
+pop IX
+ld A,activity_linger
+ld (IX),A
+
+; Store the message in the buffer. We disable interrupts during the write
+; so that we do not conflict with the timestamp interrupt's writing of 
+; clock messages to the same buffer. We pay particular attention to the
+; value of the timestamp. While we were reading out the detector modules, 
+; the timestamp may have incremented from 255 to 0 or 1, without any 
+; opportunity to store a clock message in the buffer. The timer interrupt 
+; bit will be set if and only if the timestamp has incremented without a 
+; clock message being stored, so we check this bit, and if it is set, we 
+; store 255 for the timestamp rather than the current value of the interrupt 
+; timer.
+seti
+ld A,(msg_id)
+ld (msg_write_addr),A
+ld A,(msg_hi)
+ld (msg_write_addr),A
+ld A,(msg_lo)
+ld (msg_write_addr),A
+ld A,(irq_bits_addr)
+and A,0x01
+jp z,int_mrdy_ts
+ld A,255
+jp int_mrdy_stts
+int_mrdy_ts:
+ld A,(irq_tmr1_addr)
+int_mrdy_stts:
+ld (msg_write_addr),A
+clri
+
+; Transmit a message to the display panel. The eight-bit message consists
+; of an operation code in the top four bits with value 0x1 and the lower
+; four bits of the message identifier.
+ld A,(msg_id)
+and A,0x0F
+or A,0x10
+ld (dpod_addr),A
+ld (dpoc_addr),A
+
+; Pop the registers and flags off the stack.
+read_message_done:
+pop IY
+pop IX
+pop L
+pop H
+pop E
+pop D
+pop C
+pop B
+pop A
+pop F
+ret
 
 ; ------------------------------------------------------------
 ;                       END
