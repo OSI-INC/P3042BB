@@ -1,17 +1,18 @@
--- <pre> ALT Base Board (A3038BB) Controller Firmware, Toplevel Unit
--- Repository https://github.com/OSI-INC/P3038BB. 
+-- <pre> Telemetry Control Box (TCB) Controller Firmware. 
 
 -- V1.1, 15-SEP-22: Based upon P3038BB v8.3.
 
--- V1.2, 16-SEP-22: Use DC5 and DC6 for communiation with display
--- panel. We use DC6 for Serial Data Out (SDO) and DC5 for Serial-- Data In (SDI). These signals are SHOW and HIDE on the detector
--- modules. The HIDE switch will have no effect on detectors any 
--- more, but SHOW will still show the lights. The CPU sends and 
--- receives serial bytes through the display panel registers. Add 
--- reset value high-impedance for RECEIVED_pin and INCOMING_pin. 
--- Prior ommission of explicit reset values was causing RECEIVED_pin 
--- to be driven HI by the base board, stopping all detector readout. 
+-- V1.2, 16-SEP-22: Use DC5 and DC6 for communication with display
+-- panel. We use DC6 for Serial Data Out (SDO) and DC5 for Serial-- Data In (SDI). These signals were SHOW and HIDE on the ALT
+-- detector modules. Add reset value high-impedance for RECEIVED_pin 
+-- and INCOMING_pin. Prior ommission of explicit reset values was 
+-- causing RECEIVED_pin to be driven HI by the base board, stopping 
+-- all detector readout. 
 
+-- V2.1, 20-NOV-22: Eliminate INCOMING, change RECEIVED into MRDY. 
+-- We make MRDY available in the CPU memory and as a CPU interrupt.
+-- The logic is now designed to support the TCB readout of all 
+-- messages received by individual, independent detector modules.
 
 -- Global constants and types.  
 library ieee;  
@@ -21,12 +22,12 @@ use ieee.numeric_std.all;
 entity main is 
 	port (
 		MCK : in std_logic; -- Master (10 MHz) Clock
-		RCK_pin : in std_logic; -- Reference (32.768 kHz) Clock
+		RCK_in : in std_logic; -- Reference (32.768 kHz) Clock
 		
 		cont_data : inout std_logic_vector(7 downto 0);
 		cont_addr : in std_logic_vector(5 downto 0);
-		CWR_pin : in std_logic;
-		CDS_pin : in std_logic;
+		CWR_in : in std_logic;
+		CDS_in : in std_logic;
 		ETH : in std_logic;
 		EGRN, EYLW : out std_logic;
 		
@@ -35,7 +36,7 @@ entity main is
 		REN_not : out std_logic;
 		RWE_not : out std_logic;
 		
-		HWRST_pin : in std_logic;
+		RESET_pin : inout std_logic;
 		
 		indicators : out std_logic_vector(1 to 19);
 		config_lamp : out std_logic;
@@ -45,12 +46,12 @@ entity main is
 		DSU : out std_logic; -- Data Strobe Upstream
 		dub : in std_logic_vector(7 downto 0); -- Data Upstream Bus
 		
-		DMRST : inout std_logic; -- Detector Module Reset (DC0)
-		DRC : inout std_logic; -- Detector Readout Complete (DC1)
-		DMERR_pin : in std_logic; -- Detecor Module Error (DC2)
-		INCOMING_pin : inout std_logic; -- Incoming Message Flag (DC3)
-		RECEIVED_pin : inout std_logic; -- Message Received Flag (DC4)
-		SDI : inout std_logic; -- Serial Data In (DC5)
+		DMRST_pin : inout std_logic; -- Detector Module Reset (DC0)
+		DMRC : out std_logic; -- Detector Module Read Control (DC1)
+		DMERR_in : in std_logic; -- Detecor Module Error (DC2)
+		MRDY_in : in std_logic; -- Incoming Message Flag (DC3)
+		SHOWDM : out std_logic; -- Detector Module Show Lamps (DC4)
+		SDI_in : in std_logic; -- Serial Data In (DC5)
 		SDO : out std_logic; -- Serial Data Out (DC6)
 		DMCK : out std_logic; -- Demodulator Clock (DC7)
 		
@@ -77,14 +78,16 @@ architecture behavior of main is
 	attribute nomerge : string;
 
 -- Reset signals.
-	signal RCV_RST_CPU : boolean := false; -- Receiver logic reset by CPU
-	signal RCV_RST_RELAY : boolean := false; -- Receiver logic reset by relay
-	signal HWRST : boolean := false; -- Hardware reset from switch.
+	signal RST_BY_CPU : boolean := false; -- Reset by CPU
+	signal RST_BY_RELAY : boolean := false; -- Reset by Relay
+	signal DMRST_BY_CPU : boolean := false; -- Reset Detector Modules by CPU
+	signal BBRST : boolean; -- Reset by Base Board Switch
+	signal DMRST : boolean; -- Reset from Detector Module Bus
 
 -- Synchronized, delayed, and inverted inputs.
-	signal RCK, INCOMING, RESET, RECEIVED, DMERR : std_logic;
+	signal RCK, RESET, MRDY, DMERR : std_logic;
 	signal CDS, CWR : boolean;
-	signal RECEIVED_DEL, DRC_DEL : std_logic;
+	signal DMRC_DEL : std_logic;
 	
 -- Clock and Timing Signals.
 	signal LOCK : std_logic; -- PLL Lock
@@ -92,6 +95,10 @@ architecture behavior of main is
 	signal CK : std_logic; -- State machine clock (40 MHz)
 	signal PCK : std_logic; -- Processor clock (20 MHz)
 	signal SCK : std_logic; -- Serial clock (2 MHz)
+	
+-- Indicator Signals
+	signal UPLOAD : boolean; -- Uploading To Relay
+	signal EMPTY : boolean; -- Message Buffer Empty
 
 -- Detector Modules
 	constant dm_buff_len : integer := 64;
@@ -105,6 +112,7 @@ architecture behavior of main is
 	signal MRDACK : boolean; -- Message Read Acknowledge
 	signal mrd_data : std_logic_vector(7 downto 0); -- Message Read Data
 	signal fifo_byte_count : std_logic_vector(20 downto 0);
+	constant fifo_near_empty : integer := 15; 
 
 -- CPU-Writeable Test Points
 	signal tp_reg : std_logic_vector(7 downto 0) := "00000000";
@@ -155,10 +163,10 @@ architecture behavior of main is
 	constant test_point_addr : integer := 6; -- Test Point Register (Read/Write)
 	constant msg_write_addr : integer := 7; -- Message Write Data (Write)
 	constant dm_reset_addr : integer := 8; -- Detector Module Reset (Write)
-	constant dm_complete_addr : integer := 9; -- Detector Read Complete (Write)
+	constant dm_rc_addr : integer := 9; -- Detector Read Complete (Write)
 	constant dm_strobe_addr : integer := 10; -- Data Strobe Upstream (Write)
 	constant dm_data_addr : integer := 11; -- Detector Module Data (Read)
-	constant dm_count_addr : integer := 12; -- Number of Queued Messages (Read)
+	constant dm_mrdy_addr : integer := 12; -- Detector Module Message Ready (Read)
 	constant irq_tmr1_addr : integer := 13; -- Timer One value (Read)
 	constant relay_djr_addr : integer := 14; -- Relay Device Job Register (Read)
 	constant relay_crhi_addr : integer := 15; -- Relay Command Register HI (Read)
@@ -168,11 +176,7 @@ architecture behavior of main is
 	constant relay_rc2_addr : integer := 19; -- Repeat Counter Byte 2 (Read)
 	constant relay_rc1_addr : integer := 20; -- Repeat Counter Byte 1 (Read)
 	constant relay_rc0_addr : integer := 21; -- Repeat Counter Byte 0 (Read)
-	constant fifo_cnt2_addr : integer := 22; -- Fifo Message Count Byte 2 (Read)
-	constant fifo_cnt1_addr : integer := 23; -- Fifo Message Count Byte 1 (Read)
-	constant fifo_cnt0_addr : integer := 24; -- Fifo Message Count Byte 0 (Read)
-	constant incoming_addr : integer := 25; -- Assert INCOMING (Read/Write)
-	constant received_addr : integer := 26; -- Assert RECEIVED (Read/Write)
+	constant comm_status_addr: integer := 22; -- Communication Status Register (Read)
 	constant irq_tmr2_max_addr : integer := 27; -- Timer Two Period Minus One (Read/Write)
 	constant irq_tmr2_addr : integer := 28; -- Timer Two value (Read)
 	constant fv_addr : integer := 29; -- Firmware Version number (Read)
@@ -240,8 +244,10 @@ begin
 
 	-- Our fast clock (FCK) is 80 MHz. We divide FCK down to 40 MHz for our state
 	-- machines (CK), and 20 MHz for the CPU (PCK). We divide down to 8 MHz for the 
-	-- demodulator clock (DMCK), which the demodulators multiply to 40 MHz for their 
-	-- detectors.
+	-- demodulator clock (DMCK), which the demodulators multiply to 40 MHz with 
+	-- their phase locked loops to run their detectors. We divide FCK down to 2 MHz
+	-- for our serial receiver and delays (SCK). Note that the clocks do not stop 
+	-- when RESET is asserted. We use the clocks to control our reset arbitration.
 	Divider : process (FCK) is
 	variable p_count : integer range 0 to 3;
 	variable d_count : integer range 0 to 15;
@@ -288,70 +294,80 @@ begin
 		end if;
 	end process;
 	
-	-- The Synchronizer provides positive-polarity versions of incoming signals,
-	-- synchronized with CK. We take particular care with RECEIVED_pin, which is a
-	-- slow-falling global signal that we must debounce on all falling edges.
-	Synchronizer : process (CK,RESET) is
+	-- The Input Processor provides synchronized versions of incoming 
+	-- signals and positive-polarity versions too.
+	Input_Processor : process (CK,RESET) is
 	constant max_state : integer := 15;
 	variable rcv_state, next_rcv_state : integer range 0 to max_state;
 	begin
-		-- Synchronizing with CK.
 		if rising_edge(CK) then
-			RCK <= RCK_pin;
-			CDS <= (CDS_pin = '0');
-			INCOMING <= INCOMING_pin;
-			DMERR <= DMERR_pin;
-			HWRST <= (HWRST_pin = '0');
+			RCK <= RCK_in;
+			CDS <= (CDS_in = '0');
+			MRDY <= MRDY_in;
+			DMERR <= DMERR_in;
+			DMRST <= (DMRST_pin = '1');
+			BBRST <= (RESET_pin = '0');
 		end if;
 		
-		-- Synchronize RECEIVED_pin, debounce falling edge.
-		if RESET = '1' then
-			rcv_state := 0;
-			RECEIVED <= '0';
-		elsif rising_edge(CK) then
-			if rcv_state = 0 then
-				if RECEIVED_pin = '0' then
-					RECEIVED <= '0';
-					next_rcv_state := 0;
-				else
-					RECEIVED <= '1';
-					next_rcv_state := 1;
-				end if;
-			elsif rcv_state = 1 then
-				RECEIVED <= '1';
-				if RECEIVED_pin = '0' then
-					next_rcv_state := 2;
-				else
-					next_rcv_state := 1;
-				end if;
-			elsif rcv_state = max_state then
-				RECEIVED <= '0';
-				next_rcv_state := 0;
-			else
-				RECEIVED <= '0';
-				next_rcv_state := rcv_state + 1;
-			end if;
-			rcv_state := next_rcv_state;
-		end if;
-		
-		-- Signals delayed by one CK period.
-		if rising_edge(CK) then
-			RECEIVED_DEL <= RECEIVED;
-			DRC_DEL <= DRC;
-		end if;
-	
-		-- Inversions for negative-true signals.
-		CWR <= CWR_pin = '0';
+		CWR <= (CWR_in = '0');
 	end process;
 	
-	-- The Reset Arbitrator manages the various sources of reset signals.
-	Reset_Arbitrator : process (CK)
-	constant reset_len : integer := 63;
-	variable state, next_state : integer range 0 to reset_len;
+	-- The Reset Arbitrator manages the three levels of reset. The Top-Level 
+	-- Reset is when we press either the base board reset switch or the display 
+	-- panel reset switch. The Relay, Controller, Detector Modules and Display 
+	-- Panel all reset. The hardware reset monitor, U5, generates a 100-ms
+	-- LO on !RESET. A Mid-Level Reset is one in which the Relay remains active, 
+	-- but the Controller, Detector Modules, and Display Panel reset. A Low-Level 
+	-- Reset is one in which only the Detector Modules and Display Panel reset. 
+	-- The Low-Level reset we handle directly from the Controller's CPU using
+	-- DMRST_BY_CPU, which we use to drive DMRST_pin HI. The high-level reset
+	-- provoked by the Display Panel button we handle in the Reset Arbitrator.
+	Reset_Arbitrator : process (CK,SCK) is 	constant reset_len : integer := 63;
+	variable count, state, next_state : integer range 0 to reset_len;
 	variable initiate : boolean;
 	begin
+		
+		-- If the Display Panel drives DMRST HI, we drive RESET_pin LO. The 
+		-- reset monitor, U5, holds RESET_pin LO for a hundred milliseconds. 
+		-- The LO on the hardware RESET line forces Relay and the Controller 
+		-- to reset. On the Controller, all state machines reset and the CPU
+		-- reboots. We decide that the Display Panel is driving DMRST HI 
+		-- when we have had DMRST_BY_CPU unasserted for some time, and yet 
+		-- we see that DMRST is asserted. We use SCK, 2 MHz, to generate the
+		-- required duration of the DMRST without DMRST_BY_CPU.
+		if rising_edge(SCK) then
+			if (DMRST_pin = '0') or DMRST_BY_CPU then
+				count := 0;
+				RESET_pin <= 'Z';
+			else
+				if count < reset_len then
+					count := count + 1;
+					RESET_pin <= 'Z';
+				else
+					count := reset_len;
+					RESET_pin <= '0';
+				end if;
+			end if;
+		end if;
+		
+		-- When DMRST_BY_CPU, we drive DMRST_pin HI immediately.
 		if rising_edge(CK) then
-			initiate := HWRST or RCV_RST_CPU or RCV_RST_RELAY;
+			if DMRST_BY_CPU then
+				DMRST_pin <= '1';
+			else
+				DMRST_pin <= 'Z';
+			end if;
+		end if;
+
+		-- If we have BBRST asserted, or the have the CPU or Relay trying
+		-- to reset the Controller, we initiate a controller reset, which
+		-- will in turn reset the detector modules by asserting DMRST. We
+		-- run this state machine of CK because we want to detect the PCK
+		-- pulse on RST_BY_CPU generated by a CPU write to its own reset
+		-- register. Following this pulse, we want to generate a substantial
+		-- pulse on RESET for the Controller.
+		if rising_edge(CK) then
+			initiate := BBRST or RST_BY_CPU or RST_BY_RELAY;
 			if state = 0 then
 				if initiate then 
 					next_state := 1;
@@ -367,31 +383,8 @@ begin
 			else
 				next_state := state + 1;
 			end if;
-			RESET <= to_std_logic(state >= 2);
+			RESET <= to_std_logic(state > 1);
 			state := next_state;
-		end if;
-	end process;
-	
-	-- The Available Message Counter counts up on each falling edge of RECEIVED 
-	-- and counts down on each falling edge of Detector Read Complete (DRC), so
-	-- as to keep count of the number of messages stored in the detector module
-	-- message buffers.
-	Available_Message_Counter : process (CK,DMRST)
-	begin
-		if (DMRST = '1') then
-			dm_msg_count <= 0;
-		elsif rising_edge(CK) then
-			if (RECEIVED_DEL = '1') and (RECEIVED = '0') then
-				if (DRC = '0') and (DRC_DEL = '1') then
-					dm_msg_count <= dm_msg_count;
-				else
-					dm_msg_count <= dm_msg_count + 1;
-				end if;
-			elsif (DRC = '0') and (DRC_DEL = '1') then
-				dm_msg_count <= dm_msg_count - 1;
-			else
-				dm_msg_count <= dm_msg_count;
-			end if;
 		end if;
 	end process;
 	
@@ -605,8 +598,9 @@ begin
 				to_unsigned(firmware_version,8));
 			when test_point_addr => cpu_data_in <= tp_reg;
 			when dm_data_addr => cpu_data_in <= dub;
-			when dm_count_addr => 
-				cpu_data_in <= std_logic_vector(to_unsigned(dm_msg_count,8));
+			when dm_mrdy_addr => 
+				cpu_data_in(0) <= MRDY;
+				cpu_data_in(7 downto 1) <= (others => '0');
 			when relay_djr_addr => cpu_data_in <= cont_djr;
 			when relay_crhi_addr => cpu_data_in <= cont_cr(15 downto 8);
 			when relay_crlo_addr => cpu_data_in <= cont_cr(7 downto 0);
@@ -614,26 +608,14 @@ begin
 			when relay_rc2_addr => cpu_data_in <= cont_rc(23 downto 16);
 			when relay_rc1_addr => cpu_data_in <= cont_rc(15 downto 8);
 			when relay_rc0_addr => cpu_data_in <= cont_rc(7 downto 0);
-			when incoming_addr => 
-				if (INCOMING = '1') then
-					cpu_data_in <= one_data_byte;
-				else
-					cpu_data_in <= zero_data_byte;
-				end if;
-			when received_addr => 
-				if (RECEIVED = '1') then
-					cpu_data_in <= one_data_byte;
-				else
-					cpu_data_in <= zero_data_byte;
-				end if;
-			when fifo_cnt2_addr => 
-				cpu_data_in(7 downto 5) <= "000";
-				cpu_data_in(4 downto 0) <= fifo_byte_count(20 downto 16);
-			when fifo_cnt1_addr => cpu_data_in <= fifo_byte_count(15 downto 8);
-			when fifo_cnt0_addr => cpu_data_in <= fifo_byte_count(7 downto 0);
+			when comm_status_addr => 
+				cpu_data_in(0) <= to_std_logic(UPLOAD);
+				cpu_data_in(1) <= to_std_logic(EMPTY);
+				cpu_data_in(2) <= ETH;
+				cpu_data_in(7 to 3) <= (others => '0');
 			when dpis_addr =>
-				cpu_data_in(7 downto 1) <= "0000000";
 				cpu_data_in(0) <= to_std_logic(DPRCV);
+				cpu_data_in(7 downto 1) <= (others => '0');
 			when dpid_addr => 
 				cpu_data_in <= dp_in;
 			when others => cpu_data_in <= max_data_byte;
@@ -643,9 +625,9 @@ begin
 		end case;
 		
 		-- We use the falling edge of PCK to write to registers and to initiate sensor 
-		-- and transmit activity. We have RCV_RST_CPU set upon a write to cpu_rst_addr,
+		-- and transmit activity. We have RST_BY_CPU set upon a write to cpu_rst_addr,
 		-- which provokes a RESET pulse starting on the next rising edge of CK, which in
-		-- turn causes an asynchronous reset of RCV_RST_CPU. But the RESET pulse endures,
+		-- turn causes an asynchronous reset of RST_BY_CPU. But the RESET pulse endures,
 		-- thanks to the state machine in the Reset Arbitrator. The Message Write Strobe
 		-- (MWRS) is set on a write to msg_write_addr, and mwr_data is written for the
 		-- use of the Message Buffer Controller. On the next falling edge of PCK, if 
@@ -660,13 +642,11 @@ begin
 			irq_set <= zero_data_byte;
 			dp_out <= zero_data_byte;
 			MWRS <= false;
-			DMRST <= '1';
 			DJRRST <= false;
-			RCV_RST_CPU <= false;
+			RST_BY_CPU <= false;
+			DMRST_BY_CPU <= true;
 			DPXMIT <= false;
 			DPIR <= false;
-			INCOMING_pin <= 'Z';
-			RECEIVED_pin <= 'Z';
 			for i in 1 to 15 loop indicator_control(i) <= '0'; end loop;
 		elsif falling_edge(PCK) then
 			irq_rst <= zero_data_byte;
@@ -684,27 +664,15 @@ begin
 						when irq_set_addr => irq_set <= cpu_data_out;
 						when irq_tmr1_max_addr => irq_tmr1_max <= cpu_data_out;
 						when irq_tmr2_max_addr => irq_tmr2_max <= cpu_data_out;
-						when cpu_rst_addr => RCV_RST_CPU <= true;
+						when cpu_rst_addr => RST_BY_CPU <= true;
 						when test_point_addr => tp_reg <= cpu_data_out;
 						when msg_write_addr => 
 							mwr_data <= cpu_data_out;
 							MWRS <= true;
-						when dm_reset_addr => DMRST <= cpu_data_out(0);
-						when dm_complete_addr => DRC <= cpu_data_out(0);
+						when dm_reset_addr => DMRST_BY_CPU <= (cpu_data_out(0) = '1');
+						when dm_rc_addr => DMRC <= cpu_data_out(0);
 						when dm_strobe_addr => DSU <= cpu_data_out(0);
 						when relay_djr_rst_addr => DJRRST <= true;
-						when incoming_addr => 
-							if (cpu_data_out(0) = '1') then
-								INCOMING_pin <= '1';
-							else
-								INCOMING_pin <= 'Z';
-							end if;
-						when received_addr => 
-							if (cpu_data_out(0) = '1') then
-								RECEIVED_pin <= '1';
-							else
-								RECEIVED_pin <= 'Z';
-							end if;
 						when indicators_addr + 1 to indicators_addr + 15 =>
 							indicator_control(to_integer(unsigned(cpu_addr(3 downto 0)))) 
 								<= cpu_data_out(0);
@@ -781,7 +749,7 @@ begin
 			-- that there are messages in the incoming message buffer.
 			if (irq_rst(1) = '1') then
 				irq_bits(1) <= '0';
-			elsif (dm_msg_count /= 0)
+			elsif (MRDY = '1')
 					or (irq_set(1) = '1') then
 				irq_bits(1) <= '1';
 			end if;
@@ -826,10 +794,10 @@ begin
 	-- the Message Buffer Controller sets Message Read Acknowledge (MRACK) for
 	-- readback at the strobe location. When the Relay reads the byte from the read
 	-- location, the Relay Interface clears MRDS, and the Message Buffer Controller
-	-- clears MRDACK a clock period later. The RCV_RST_RELAY signal initiates a
+	-- clears MRDACK a clock period later. The RST_BY_RELAY signal initiates a
 	-- RESET pulse, which is produced by the Reset Arbitrator. This pulse endures
-	-- for many clock cycles, regardless of when RCV_RST_RELAY is unasserted, so
-	-- we are free to clear RCV_RST_RELAY with an asynchronous reset using the
+	-- for many clock cycles, regardless of when RST_BY_RELAY is unasserted, so
+	-- we are free to clear RST_BY_RELAY with an asynchronous reset using the
 	-- RESET pulse. We note that the RESET pulse causes a pulse on Detector 
 	-- Module Reset (DMRST) and Device Job Register Reset (DJRRST), and so resets
 	-- not only the controller, but the demodulators and the job register. But
@@ -844,7 +812,7 @@ begin
 			cont_data <= high_z_byte;
 			cont_djr <= zero_data_byte;
 			MRDS <= false;
-			RCV_RST_RELAY <= false;
+			RST_BY_RELAY <= false;
 		elsif rising_edge(CK) then		
 			if CWR then cont_data <= high_z_byte; end if;
 			
@@ -857,7 +825,7 @@ begin
 				when cont_rc2_addr => cont_rc(23 downto 16) <= cont_data;
 				when cont_rc1_addr => cont_rc(15 downto 8) <= cont_data;
 				when cont_rc0_addr => cont_rc(7 downto 0) <= cont_data;
-				when cont_srst_addr => RCV_RST_RELAY <= true;
+				when cont_srst_addr => RST_BY_RELAY <= true;
 				when cont_fifo_ds_addr => MRDS <= true;
 				end case;
 			elsif CDS and (not CWR) then
@@ -889,7 +857,7 @@ begin
 					end if;
 				when cont_fifo_ds_addr =>
 					cont_data(0) <= to_std_logic(MRDACK);
-					cont_data(7 downto 1) <= "0000000";
+					cont_data(7 downto 1) <= (others => '0');
 				when cont_fifo_rd_addr =>
 					cont_data <= mrd_data;
 					MRDS <= false;
@@ -908,24 +876,16 @@ begin
 	-- does not reset with the RESET signal, but only on power-up. The
 	-- HIDE and SHOW buttons work so long as RCK is running and we have
 	-- power. No malfunction of the CPU program can stop them.
-	Lamp_Inhibitor : process (RCK_pin,RESET) is
+	Lamp_Inhibitor : process (RCK_in,RESET) is
 	constant wait_count : integer := 4095;
 	variable debounce_state : integer range 0 to wait_count := 0;
 	begin
-		if rising_edge(RCK_pin) then
-			if switches(3) = '1' then
-				HIDE <= true;
-			else
-				HIDE <= false;
-			end if;
+		if rising_edge(RCK_in) then
+			HIDE <= (switches(3) = '1');
 			indicators(19) <= to_std_logic(not HIDE);
-			
-			if switches(2) = '1' then
-				SHOW <= true;
-			else
-				SHOW <= false;
-			end if;
+			SHOW <= (switches(2) = '1');
 			indicators(18) <= to_std_logic(not SHOW); 
+			SHOWDM <= switches(2);
 		end if;
 		
 		-- Set the indicator lamps according to the indicator control
@@ -948,18 +908,11 @@ begin
 	-- bytes of the dp_out register at 1 Mbps. The SDO signal is usually
 	-- LO, so we begin with 2 us of guaranteed LO for set-up, then a 1-us 
 	-- HI for a start bit, and the eight data bits, 1 us each. We end with
-	-- a 1-us HI for a stop bit. The SDO signal used to be called SHOWDM on 
-	-- the ALT Base Board, and on the detector modules it still serves the 
-	-- SHOW function to turn on all the lights. We preserve this function 
-	-- now by asserting SDO when the SHOW button is pressed on the base 
-	-- board. We are still able to transmit, but SHOW keeps SDO HI after 
-	-- each transmission until the next. The transmitter remains in its
-	-- stop bit state until DPXMIT is asserted again, when it immediately
-	-- embarks upon another transmission. Because the transmitter resets
-	-- to its start state on RESET, the transmitter will transmit a zerop
-	-- byte immediately after reset. The CPU asserts DPXMIT for one CK
-	-- cycle by writing any value to the Display Panel Output Control 
-	-- Register (dpoc_addr).
+	-- a 1-us HI for a stop bit. Because the transmitter resets to its 
+	-- start state on RESET, the transmitter will transmit a zero byte 
+	-- immediately after reset. The CPU asserts DPXMIT for one CK cycle by 
+	-- writing any value to the Display Panel Output Control Register 
+	-- (dpoc_addr).
 	Display_Panel_Transmitter : process (SCK,DPXMIT) is 
 	variable state : integer range 0 to 31;
 	begin
@@ -989,9 +942,9 @@ begin
 				when 19 => SDO <= dp_out(1);
 				when 20 => SDO <= dp_out(0);
 				when 21 => SDO <= dp_out(0);
-				when 22 => SDO <= to_std_logic(SHOW);
-				when 23 => SDO <= to_std_logic(SHOW);
-				when 24 => SDO <= to_std_logic(SHOW);
+				when 22 => SDO <= '0';
+				when 23 => SDO <= '0';
+				when 24 => SDO <= '0';
 			end case;
 			if state < 24 then 
 				state := state + 1;
@@ -1010,10 +963,10 @@ begin
 	variable RSDI, FSDI : std_logic;
 	begin
 		if falling_edge(SCK) then
-			FSDI := SDI;
+			FSDI := SDI_in;
 		end if;
 		if rising_edge(SCK) then
-			RSDI := SDI;
+			RSDI := SDI_in;
 		end if;
 		
 		if (RESET = '1') or DPIR then
@@ -1042,38 +995,54 @@ begin
 		end if;
 	end process;
 	
-	-- Ethernet activity and lamps.
-	EGRN <= '1';
-	EYLW <= to_std_logic(ETH = '0');
-	
-	-- Upload indicator, shines when Relay is reading from message FIFO.
-	-- Empty indicator, shines when the FIFO is nearly empty. Both indicators
-	-- turn on when their logic signal is LO.
+	-- The UPLOAD flag is set when the Relay is reading from the message buffer.
+	-- The EMPTY flag is set when the FIFO is nearly empty.
 	Fifo_Indicators : process (CK,RESET) is
+	constant end_count : integer := 255;
+	variable upload_state, empty_state : integer range 0 to end_count;
 	begin
+		
 		if (RESET = '1') then
-			indicators(16) <= '1';
-			indicators(17) <= '1';
+			UPLOAD <= false;
+			upload_state := 0;
+			EMPTY <= false;
+			empty_state := 0;
 		elsif rising_edge(CK) then
-			-- Indicator 16 is UPLOAD.
-			if (MRDS and (not HIDE)) or SHOW then
-				indicators(16) <= '0';
+			if upload_state = 0 then
+				if MRDS then
+					upload_state := 1;
+				else 
+					upload_state := 0;
+				end if;
 			else
-				indicators(16) <= '1';
+				upload_state := upload_state + 1;
 			end if;
+			UPLOAD <= (upload_state > 0);
 			
-			-- Indicator 17 is EMPTY.
-			if ((to_integer(unsigned(fifo_byte_count)) = 0) 
-					and (not HIDE)) or SHOW then
-				indicators(17) <= '0';
+			if empty_state = 0 then
+				if (to_integer(unsigned(fifo_byte_count)) < fifo_near_empty) then
+					empty_state := 1;
+				else
+					empty_state := 0;
+				end if;
 			else
-				indicators(17) <= '1';
+				empty_state := empty_state + 1;
 			end if;
+			EMPTY <= (empty_state > 0);
 		end if;
 	end process;
 	
-	-- Configure lamp. Turns on when the config lamp output goes low.
+	-- Upload and Empty indicators are 16 and 17 respectively, but they 
+	-- are negative true.
+	indicators(16) <= to_std_logic(not UPLOAD);
+	indicators(17) <= to_std_logic(not EMPTY);
+	
+	-- Configure lamp. Turns on when the config lamp output is '0'.
 	config_lamp <= to_std_logic(switches(4) = '0'); -- Configuration lamp and switch
+	
+	-- Ethernet activity and lamps. These turn on when their outputs are '1'.
+	EGRN <= '1';
+	EYLW <= to_std_logic(ETH = '0');
 	
 	-- Test points. We have TP1..TP3 showing the microprocessor-controlled registers 
 	-- zero through two. We have TP4 showing us any changes in the upstream data bus.

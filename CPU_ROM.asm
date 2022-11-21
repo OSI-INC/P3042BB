@@ -19,10 +19,10 @@ const cpu_rst_addr 0x1E05 ; Program Reset (Write)
 const test_point_addr 0x1E06 ; Test Point Register (Read/Write)
 const msg_write_addr 0x1E07 ; Message Write Data (Write)
 const dm_reset_addr 0x1E08 ; Detector Module Reset (Write)
-const dm_complete_addr 0x1E09 ; Detector Read Complete (Write)
+const dm_rc_addr 0x1E09 ; Detector Module Read Complete (Write)
 const dm_strobe_addr 0x1E0A ; Data Strobe Upstream (Write)
 const dm_data_addr 0x1E0B ; Detector Module Data (Read)
-const dm_count_addr 0x1E0C ; Number of Queued Messages (Read)
+const dm_mrdy_addr 0x1E0C ; Message Ready Flag (Read)
 const irq_tmr1_addr 0x1E0D ; The interrupt timer value (Read)
 const relay_djr_addr 0x1E0E ; Relay Device Job Register (Read)
 const relay_crhi_addr 0x1E0F ; Relay Command Register HI (Read)
@@ -32,11 +32,8 @@ const relay_rc3_addr 0x1E12 ; Repeat Counter Byte 3 (Read)
 const relay_rc2_addr 0x1E13 ; Repeat Counter Byte 2 (Read)
 const relay_rc1_addr 0x1E14 ; Repeat Counter Byte 1 (Read)
 const relay_rc0_addr 0x1E15 ; Repeat Counter Byte 0 (Read)
-const fifo_cnt2_addr 0x1E16 ; Fifo Message Count Byte 2 (Read)
-const fifo_cnt1_addr 0x1E17 ; Fifo Message Count Byte 1 (Read)
-const fifo_cnt0_addr 0x1E18 ; Fifo Message Count Byte 0 (Read)
-const incoming_addr 0x1E19 ; Detector Module Incoming (Read/Write)
-const received_addr 0x1E1A ; Detector Module Received (Read/Write)
+const comm_status_addr 0x1E16 ; Communication Status Register (Read)
+const fifo_empty_addr 0x1E1A ; Fifo Nearly Empty (Read)
 const irq_tmr2_max_addr 0x1E1B ; Interrupt Timer Two Period Minus One (Read/Write)
 const irq_tmr2_addr 0x1E1C ; Interrupt Counter Value (Read)
 const fv_addr 0x1E1D ; Firmware Version number (Read)
@@ -56,6 +53,9 @@ const reset_bit_mask 0x01
 const sel_bit_mask 0x04
 const select_all_code 0xFF
 const select_none_code 0x00
+const upload_bit_mask 0x01
+const empty_bit_mask 0x02
+const ethernet_bit_mask 0x04
 
 ; Hardware Constants.
 const num_indicators 15
@@ -87,19 +87,17 @@ const antenna_16 16
 
 ; Interrupt bit masks.
 const int_ts_mask 0x01
-const int_rcv_mask 0x02
+const int_mrdy_mask 0x02
 const int_lamps_mask 0x08
 const int_dmerr_mask 0x04
 const int_unused_mask 0xF0
 
 ; Software Constants
 const sp_initial 0x1700 ; Bottom of the stack in RAM.
-const init_bg_pwr_value 15 ; Initial value for background powers
 
 ; Timinig Constants. RCK is 32.768 kHz, PCK is 20 MHz.
 const rck_per_ts 255 ; RCK periods per timestamp interrupt minus one
 const rck_per_lamps 15 ; RCK periods per lamp interrupt minus one
-const ts_per_bgpwr 64; Timestamp interrupts per background measurement
 const activity_linger 4 ; Timer periods of light per message received
 const flash_linger 200 ; Timer periods for reset flash
 const daisy_chain_delay 10 ; PCK periods for daisy-chain round trip
@@ -109,13 +107,13 @@ const dmrst_length 10 ; PCK periods for reset pulse.
 const msg_id 0x0000 ; Message ID
 const msg_hi 0x0001 ; HI byte of message contents
 const msg_lo 0x0002 ; LO byte of message contents
-const clock_hi 0x0003 ; HI byte of clock
-const clock_lo 0x0004 ; LO byte of clock
-const ts_cntr 0x0005 ; Counts timer interrupts
-const dm_pwr 0x0100 ; Power array, size is num_detectors
+const msg_pwr 0x003 ; Power of message
+const msg_an 0x004 ; Antenna number of message
+const clock_hi 0x0005 ; HI byte of clock
+const clock_lo 0x0006 ; LO byte of clock
+const ts_cntr 0x0007 ; Counts timer interrupts
 const zero_channel_select 0x0200 ; Base of channel select array
 const zero_channel_timer 0x0300 ; Base of channel timer array
-const dm_bg_pwr 0x0400 ; Base of background power array
 
 ; ------------------------------------------------------------
 ;                         START
@@ -192,14 +190,9 @@ ld (dm_reset_addr),A
 ld A,dmrst_length
 dly A
 
-; Clear detector modulr reset, DMRST, which allows the detectors to start receiving.
+; Clear detector module reset, DMRST, which allows the detectors to start receiving.
 ld A,0x00
 ld (dm_reset_addr),A
-
-; Make sure we are not asserting INCOMING or RECEIVED.
-ld A,0x00
-ld (incoming_addr),A
-ld (received_addr),A
 
 ; Write a zero clock message into the message buffer. We use "nop" instructions
 ; as a delay between writes to the message buffer so as to allow the buffer time
@@ -224,27 +217,7 @@ ld A,(fv_addr)
 add A,receiver_type
 ld (msg_write_addr),A
 
-; Store the initial values of background powers as the payload to the 
-; clock message.
-ld IX,dm_bg_pwr
-ld A,num_detectors
-push A
-pop B
-ld A,init_bg_pwr_value
-init_bg_pwr:
-inc IX
-ld (IX),A
-dec B
-jp nz,init_bg_pwr
-ld HL,dm_bg_pwr
-call store_powers
-
-; Set the timestamp interrupt counter to one, so we will record 
-; background powers on the next timestamp interrupt.
-ld A,1
-ld (ts_cntr),A
-
-; Set up a interrupt timer.
+; Configure interrupt timers.
 configure_interrupts:
 ld A,rck_per_ts
 ld (irq_tmr1_max_addr),A 
@@ -255,10 +228,10 @@ ld (irq_tmr2_max_addr),A
 ld A,select_all_code    
 ld (irq_reset_addr),A  
 
-; Turn on timer interrupt, receive message interrupt, and lamp interrupts. 
+; Turn on timer interrupt, message ready interrupt, and lamp interrupts. 
 ; Note that interrupts are currently disabled by the I flag.
 ld A,int_ts_mask
-or A,int_rcv_mask
+or A,int_mrdy_mask
 or A,int_lamps_mask            
 ld (irq_mask_addr),A  
 
@@ -457,7 +430,7 @@ ld A,(irq_bits_addr)
 and A,int_ts_mask
 jp nz,int_ts
 ld A,(irq_bits_addr)
-and A,int_rcv_mask
+and A,int_mrdy_mask
 jp nz,int_rcv
 ld A,(irq_bits_addr)
 and A,int_lamps_mask
@@ -489,7 +462,8 @@ ld (clock_hi),A
 ; and low bytes to the message buffer, followed by the receiver
 ; version. These four bytes are the clock message without any
 ; payload. We add "nop" instructions to give the message buffer
-; writes time to complete.
+; writes time to complete. We add two zeros for the power and
+; antenna number of the timestamp message.
 store_clock:
 ld A,0x00
 ld (msg_write_addr),A
@@ -502,49 +476,11 @@ nop
 ld A,(clock_lo)
 ld (msg_write_addr),A
 nop
-nop
 ld A,(fv_addr)
 add A,receiver_type
 ld (msg_write_addr),A
 
-; Store the background powers as the payload to the clock message.
-ld HL,dm_bg_pwr
-call store_powers
-
-; Every ts_per_bgpwr timestamp interrupts, we refresh our measurement
-; of background power.
-ld A,(ts_cntr)
-dec A
-ld (ts_cntr),A
-jp nz,int_ts_done
-ld A,ts_per_bgpwr
-ld (ts_cntr),A
-
-; Check to see if INCOMING or RECEIVED are unasserted. If not, then
-; jump to end of timestamp interrupt.
-ld A,(incoming_addr)
-and A,0x01
-jp nz,int_ts_done
-ld A,(received_addr)
-and A,0x01
-jp nz,int_ts_done
-
-; Assert INCOMING then RECEIVED so as to get the detector modules
-; to store a background power measurement. We start by asserting 
-; INCOMING, wait 1.5 us, assert RECEIVED, wait 1.5 us, unassert both.
-ld A,0x01
-ld (incoming_addr),A
-ld A,30
-dly A
-ld A,0x01
-ld (received_addr),A
-ld A,30
-dly A
-ld A,0x00
-ld (incoming_addr),A
-ld (received_addr),A
-
-; Reset the timer interrupt.
+; Reset the timestamp interrupt.
 int_ts_done:
 ld A,int_ts_mask             
 ld (irq_reset_addr),A  
@@ -552,22 +488,16 @@ jp int_done
 
 ; --------------------------------------------------------------
 ; Read out the detector modules using the daisy chain bus. If the
-; channel is selected for storage, read the entire power array, store
-; the message id, contents, and power measurements in RAM, the channel
-; activity lamp that corresponds to the message identifier, and store
-; the message in the message buffer. 
+; channel is selected for storage, activate a channel activity lamp 
+; and store the message in the message buffer. 
 ; --------------------------------------------------------------
 int_rcv:
 
-; First pulse on DSU allows detectors to determine the best
-; receiver and so establish the channel ID. We give the detector
-; modules a few clock cycles to settle down.
+; We start by asserting Detector Module Read Control (DMRC) to
+; start the read cycle. We wait a while to allow the daisy chain
+; data strobe lines to settle.
 ld A,0x01               
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-ld A,0x00
-ld (dm_strobe_addr),A
+ld (dm_rc_addr),A
 ld A,daisy_chain_delay
 dly A
 
@@ -585,13 +515,6 @@ dly A
 
 ; Check that this channel is among those enabled by the channel select
 ; array. If not, set the message_id to zero and terminate the readout.
-; A message with message_id zero is one we always read out, because it
-; contains background powers. We will store the background powers in 
-; an array, but we will not write a zero-channel message to memory. We 
-; write zero-channel messages only on timestamp interrupts.
-ld A,(msg_id)
-add A,0x00
-jp z,int_continue_read
 ld HL,zero_channel_select
 push H
 ld A,(msg_id)
@@ -629,56 +552,39 @@ ld (dm_strobe_addr),A
 ld A,daisy_chain_delay
 dly A
 
-; Read the detector powers, storing them in locations dm_pwr + daisy chain 
-; location when the message_id is non-zero, storing them in the dm_bg_pwr + 
-; daisy chain location when the message_id is zer. So the first detector 
-; power will be at location dm_pwr + 1 or dm_bg_pwr + 1. First we load IX 
-; with the base of the correct array.
-ld A,(msg_id)
-add A,0x00
-jp z,sel_dm_bg
-ld IX,dm_pwr
-jp rd_all_pwrs
-sel_dm_bg:
-ld IX,dm_bg_pwr
-
-; Read the daisy chain to get the power from each detector module.
-rd_all_pwrs:
-ld A,num_detectors
-push A
-pop B
-inc IX
-rd_pwr:
+; Read the detector power.
 ld A,0x01               
 ld (dm_strobe_addr),A
 ld A,daisy_chain_delay
 dly A
 ld A,(dm_data_addr)
-ld (IX),A
+ld (msg_pwr),A
 ld A,0x00
 ld (dm_strobe_addr),A
 ld A,daisy_chain_delay
 dly A
-inc IX
-dec B
-jp nz,rd_pwr
 
-; Generate a pulse on Detector Read Complete
-dm_drc:
+; Read the antenna number.
 ld A,0x01               
-ld (dm_complete_addr),A
+ld (dm_strobe_addr),A
 ld A,daisy_chain_delay
 dly A
+ld A,(dm_data_addr)
+ld (msg_an),A
+ld A,0x00
+ld (dm_strobe_addr),A
+ld A,daisy_chain_delay
+dly A
+
+; Unassert Detector Module Read Control
+dm_drc:
 ld A,0x00               
-ld (dm_complete_addr),A
+ld (dm_rc_addr),A
 
 ; Check again to see if the message id is zero, and if so, we are done.
-; We don't store a zero-id message in the buffer now, we will do so at
-; the next timestamp interrupt, and at that time we will use the background
-; powers stored in this receive interrupt.
 ld A,(msg_id)
 add A,0x00
-jp z,int_rcv_done
+jp z,int_mrdy_done
 
 ; Set the channel indicator timer. We use the lower four bits of
 ; the channel ID to select one of the fifteen indicator lamps.
@@ -707,19 +613,13 @@ ld A,(msg_lo)
 ld (msg_write_addr),A
 ld A,(irq_bits_addr)
 and A,0x01
-jp z,int_rcv_ts
+jp z,int_mrdy_ts
 ld A,255
-jp int_rcv_stts
-int_rcv_ts:
+jp int_mrdy_stts
+int_mrdy_ts:
 ld A,(irq_tmr1_addr)
-int_rcv_stts:
+int_mrdy_stts:
 ld (msg_write_addr),A
-
-; Store the power measurements in the buffer. We use the
-; store powers routine to transfer the powers we have just
-; recorded in the dm_pwr array.
-ld HL,dm_pwr
-call store_powers
 
 ; Transmit a message to the display panel. The eight-bit message consists
 ; of an operation code in the top four bits with value 0x1 and the lower
@@ -731,8 +631,8 @@ ld (dpod_addr),A
 ld (dpoc_addr),A
 
 ; Reset the receiver interrupt.
-int_rcv_done:
-ld A,int_rcv_mask             
+int_mrdy_done:
+ld A,int_mrdy_mask             
 ld (irq_reset_addr),A  
 jp int_done
 
@@ -831,144 +731,6 @@ rti
 ; Calling convention: calling process pushes anything it wants
 ; protected onto the stack before calling, and pops upon return.
 
-; Store Detector Powers in Message Buffer. We un-scramble the daisy 
-; chain so as to present the measurements in the order of the base 
-; board coil numbering, rather than the daisy chain order. Stores 
-; a total of sixteen bytes to the message buffer for sixteen power
-; detector values. The power values must be available in an array 
-; pointed to by HL when the routine is called.
-store_powers:
-
-; Detector Coil Number 1.
-ld A,antenna_1
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 2.
-ld A,antenna_2
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 3.
-ld A,antenna_3
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 4.
-ld A,antenna_4
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 5.
-ld A,antenna_5
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 6.
-ld A,antenna_6
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 7.
-ld A,antenna_7
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 8.
-ld A,antenna_8
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 9.
-ld A,antenna_9
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 10.
-ld A,antenna_10
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 11.
-ld A,antenna_11
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 12.
-ld A,antenna_12
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 13.
-ld A,antenna_13
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 14.
-ld A,antenna_14
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 15.
-ld A,antenna_15
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-; Detector Coil Number 16.
-ld A,antenna_16
-push H
-push A
-pop IX
-ld A,(IX)
-ld (msg_write_addr),A
-
-done_store_powers:
-ret
 
 ; ------------------------------------------------------------
 ;                       END
