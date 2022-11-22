@@ -39,16 +39,16 @@ const irq_tmr2_addr 0x1E1C ; Interrupt Counter Value (Read)
 const fv_addr 0x1E1D ; Firmware Version number (Read)
 const zero_indicator_addr 0x1E20 ; Zero channel indicator (Write)
 const dpoc_addr 0x1E40 ; Display Panel Output Control
-const dpod_addr 0x1E41 ; -- Display Panel Output Data
-const dpis_addr 0x1E42 ; -- Display Panel Input Status
-const dpid_addr 0x1E43 ; -- Display Panel Input Data
-const dpir_addr 0x1E44 ; -- Display Panel Input Read
+const dpod_addr 0x1E41 ; Display Panel Output Data
+const dpis_addr 0x1E42 ; Display Panel Input Status
+const dpid_addr 0x1E43 ; Display Panel Input Data
+const dpir_addr 0x1E44 ; Display Panel Input Read
 
 ; Controller job numbers.
 const read_job 3
 const command_job 10
 
-; Command bit masks.
+; Bit masks.
 const reset_bit_mask 0x01
 const sel_bit_mask 0x04
 const select_all_code 0xFF
@@ -56,41 +56,40 @@ const select_none_code 0x00
 const upload_bit_mask 0x01
 const empty_bit_mask 0x02
 const ethernet_bit_mask 0x04
-
-; Hardware Constants.
-const num_indicators 15
-const num_detectors 16
-
-; Detector coil to daisy chain mapping. We give the location in the
-; daisy chain of each antenna coil. We will write the antenna coil
-; powers into a buffer in order they are listed on the tracker geometry
-; drawing. The number of antennas whos powers are written to memory
-; is not necessarily equal the number of detector modules. The power
-; measurement from an auxilliary antenna will be written last or not 
-; at all.
-const antenna_1 8
-const antenna_2 7
-const antenna_3 6
-const antenna_4 9
-const antenna_5 5
-const antenna_6 4
-const antenna_7 11
-const antenna_8 10
-const antenna_9 3
-const antenna_10 12
-const antenna_11 13
-const antenna_12 2
-const antenna_13 15
-const antenna_14 14
-const antenna_15 1
-const antenna_16 16
-
-; Interrupt bit masks.
 const int_ts_mask 0x01
 const int_mrdy_mask 0x02
 const int_lamps_mask 0x08
 const int_dmerr_mask 0x04
 const int_unused_mask 0xF0
+const valid_id_mask 0x0F
+
+; Display panel opcodes
+const dp_opcode_msg 0x10
+const dp_opcode_comms 0x20
+
+; Hardware Constants.
+const num_indicators 15
+const num_detectors 16
+
+; Daisy chain index to antenna input map. The constant "index_0", for
+; example, contains the antenna input number connected to the first
+; detector module in the daisy chain.
+const index_0 1
+const index_1 2
+const index_2 3
+const index_3 4
+const index_4 5
+const index_5 6
+const index_6 7
+const index_7 8
+const index_8 9
+const index_9 10
+const index_10 11
+const index_11 12
+const index_12 13
+const index_13 14
+const index_14 15
+const index_15 16
 
 ; Software Constants
 const sp_initial 0x1700 ; Bottom of the stack in RAM.
@@ -104,14 +103,19 @@ const daisy_chain_delay 10 ; PCK periods for daisy-chain round trip
 const dmrst_length 10 ; PCK periods for reset pulse.
 
 ; Variable Locations.
-const msg_id 0x0000 ; Message ID
-const msg_hi 0x0001 ; HI byte of message contents
-const msg_lo 0x0002 ; LO byte of message contents
-const msg_pwr 0x003 ; Power of message
-const msg_an 0x004 ; Antenna number of message
-const clock_hi 0x0005 ; HI byte of clock
-const clock_lo 0x0006 ; LO byte of clock
-const ts_cntr 0x0007 ; Counts timer interrupts
+const msg_id      0x0000 ; Message Identifier
+const msg_hi      0x0001 ; Message Data, HI
+const msg_lo      0x0002 ; Message Data, LO
+const msg_pwr     0x0003 ; Message Power
+const msg_an      0x0004 ; Message Antenna Number
+const msg_id_prv  0x0000 ; Previous Message Identifier
+const msg_hi_prv  0x0001 ; Previous Message Data, HI
+const msg_lo_prv  0x0002 ; Previous Message Data, LO
+const msg_pwr_prv 0x0003 ; Previous Message Power
+const msg_an_prv  0x0004 ; Previous Message Antenna Number
+const clock_hi    0x0020 ; Clock HI
+const clock_lo    0x0021 ; Clock LO
+const ts_cntr     0x0022 ; Time Stamp Counter
 const zero_channel_select 0x0200 ; Base of channel select array
 const zero_channel_timer 0x0300 ; Base of channel timer array
 
@@ -162,6 +166,14 @@ inc IX
 dec B
 jp nz,init_channel_select_loop
 
+; Clear the previous message.
+ld A,0x00
+ld (msg_id_prv),A
+ld (msg_hi_prv),A
+ld (msg_lo_prv),A
+ld (msg_pwr_prv),A
+ld (msg_an_prv),A
+
 ; Flash the indicators. We set all the indicator counters to the flash_linger value
 ; and so turn on the indicators for flash_linger timer interrupt periods. The flash
 ; will start only after we enable interrupts.
@@ -181,16 +193,18 @@ ld A,0x00
 ld (clock_hi),A
 ld (clock_lo),A
 
-; If we are initializing after RESET, the detector modules will already be
-; in their reset state because DMRST will be asserted. If we are re-initializing
-; in software, howerver, we must set DMRST now to reset the detectors. We wait 
-; for some time to allow the reset to complete.
+; If we are initializing after a Top-Level or Mid-Level reset, the detector modules will
+; already be reset, but if we are re-booting the Controller by jumping to the initialize
+; routine, we need to assert DMRST to reset the detector modules and the display panel,
+; so we do that now.
 ld A,0x01
 ld (dm_reset_addr),A
 ld A,dmrst_length
 dly A
 
-; Clear detector module reset, DMRST, which allows the detectors to start receiving.
+; We just set DMRST in our code, but even if we had not done so, we would still have to
+; clear it now, because a Top-Level or Mid-Level reset will set DMRST and leave it set
+; after the reset is over.
 ld A,0x00
 ld (dm_reset_addr),A
 
@@ -228,8 +242,8 @@ ld (irq_tmr2_max_addr),A
 ld A,select_all_code    
 ld (irq_reset_addr),A  
 
-; Turn on timer interrupt and lamp interrupts. Interrupts are currently 
-; disabled by the I flag.
+; Unmask the timer and lamp interrupts. Interrupts are currently disabled 
+; by the I flag.
 ld A,int_ts_mask
 or A,int_lamps_mask            
 ld (irq_mask_addr),A  
@@ -238,12 +252,12 @@ ld (irq_mask_addr),A
 ; is ready for further commands. Any write to the reset location will do.
 ld (relay_djr_rst_addr),A
 
-; Falling edge on tp_reg(2).
+; Falling edge on tp_reg(2) indicates the end of initialization.
 ld A,(test_point_addr)
 and A,0xFB                  
 ld (test_point_addr),A   
 
-; The last thing we do is enable interrupts
+; Enable interrupts to start the data acquisition.
 clri
 
 ; Go to the main program.
@@ -262,11 +276,85 @@ ld A,(test_point_addr)
 or A,0x01                    
 ld (test_point_addr),A   
 
+; ---------------------------------------------------------------
+; Check the message ready flag, and it it's set, read a message from
+; the daisy chain with the rd_msg routine. If it's not save any
+; previous message that remains to be saved. If we read out a new
+; message, compare to the previous message and act accordingly.
+; ---------------------------------------------------------------
 ld A,(dm_mrdy_addr)
 and A,0x01
-jp z,no_messages
-call read_message
-no_messages:
+jp z,main_no_mrdy
+call rd_msg
+
+; If the message is not valid, act as if there were no mrdy. An 
+; invalid message can arise from a break in the daisy chain, 
+; where an isolated detector module is asserting MRDY, but the
+; readout is all zeros from the break. Under these circumstances,
+; we will never see MRDY unasserted, so we have to carry on anyway.
+ld A,(msg_id)
+and A,valid_id_mask
+jp z,main_no_mrdy
+
+; We compare a valid new message with our previous message. If
+; their identifiers differ, we save the previous message and keep 
+; the new one for later.
+ld A,(msg_id)
+push A
+pop B
+ld A,(msg_id_prv)
+sub A,B
+jp nz,main_save_prv
+
+; If the identifiers are the same, we compare their powers. If the
+; new message power is less than or equal to the previous message
+; power, we do nothing further.
+ld A,(msg_pwr_prv)
+push A
+pop B
+ld A,(msg_pwr)
+sub A,B
+jp np,main_done_messages
+
+; With the new message having greater power, we overwrite the previous
+; message with the new one, but we do not save to our message buffer.
+jp main_overwrite_prv
+
+; Save the previous message and copy the new message into our previous
+; message locations.
+main_save_prv:
+call save_msg_prv
+jp main_overwrite_prv
+
+; Overwrite the previous message with the new message.
+main_overwrite_prv:
+ld A,(msg_id)
+ld (msg_id_prv),A
+ld A,(msg_hi)
+ld (msg_hi_prv),A
+ld A,(msg_lo)
+ld (msg_lo_prv),A
+ld A,(msg_pwr)
+ld (msg_pwr_prv),A
+ld A,(msg_an)
+ld (msg_an_prv),A
+jp main_done_messages
+
+; Without a message ready flag, we check if we have a previous message waiting
+; to be stored. If so, we will store it.
+main_no_mrdy:
+ld A,(msg_id_prv)
+and A,valid_id_mask
+jp z,main_done_messages
+
+; Save the previous message and delete it.
+call save_msg_prv
+ld A,0
+ld (msg_id_prv),A
+jp main_done_messages
+
+; Done with dealing with messages.
+main_done_messages:
 
 ; ---------------------------------------------------------------
 ; Check the Device Job Register. If it's not zero, take action and 
@@ -583,11 +671,10 @@ rti
 ; protected onto the stack before calling, and pops upon return.
 
 ; --------------------------------------------------------------
-; Read a message from the detector module daisy chain, enable
-; a channel activity lamp and store the message in the message
-; buffer with a timestamp.
+; Read a message from the detector module daisy chain and store
+; in the 'msg' variables.
 ; --------------------------------------------------------------
-read_message:
+rd_msg:
 
 ; Push all the flags and registers onto the stack so we don't
 ; have to worry about which ones we use in the interrupt.
@@ -621,13 +708,15 @@ ld (dm_strobe_addr),A
 ld A,daisy_chain_delay
 dly A
 
-; If the message ID is zero, abandon the read: this message is invalid.
+; If the lower four bits of the message ID are zero, abandon the read. All
+; such ID values are reserved for internal use by the controller.
 ld A,(msg_id)
-add A,0x00
-jp z,dm_drc
+and A,valid_id_mask
+jp z,rd_msg_terminate
 
 ; Check that this channel is among those enabled by the channel select
-; array. If not, set the message_id to zero and terminate the readout.
+; array. If not, set the message identifier to zero and terminate the
+; readout. 
 ld HL,zero_channel_select
 push H
 ld A,(msg_id)
@@ -635,13 +724,13 @@ push A
 pop IX
 ld A,(IX)
 sub A,0x00
-jp nz,int_continue_read
+jp nz,rd_msg_continue
 ld A,0x00
 ld (msg_id),A
-jp dm_drc
+jp rd_msg_terminate
 
 ; Read the HI data byte.
-int_continue_read:
+rd_msg_continue:
 ld A,0x01               
 ld (dm_strobe_addr),A
 ld A,daisy_chain_delay
@@ -690,21 +779,59 @@ ld A,daisy_chain_delay
 dly A
 
 ; Unassert Detector Module Read Control
-dm_drc:
+rd_msg_terminate:
 ld A,0x00               
 ld (dm_rc_addr),A
 
-; Check again to see if the message id is zero, and if so, we are done.
-ld A,(msg_id)
-add A,0x00
-jp z,read_message_done
+; Pop the registers and flags off the stack.
+rd_msg_done:
+pop IY
+pop IX
+pop L
+pop H
+pop E
+pop D
+pop C
+pop B
+pop A
+pop F
+ret
+
+; --------------------------------------------------------------
+; Store the previous message in the message buffer, enable an
+; activity lamp on the base board, transmit a lamp activity 
+; notification to the display panel.
+; --------------------------------------------------------------
+save_msg_prv:
+
+; Push all the flags and registers onto the stack so we don't
+; have to worry about which ones we use in the interrupt.
+push F 
+push A
+push B
+push C
+push D
+push E
+push H
+push L
+push IX
+push IY
+
+; Transmit a message to the display panel. The eight-bit message consists
+; of an operation code in the top four bits and the lower four bits of the 
+; message identifier.
+ld A,(msg_id_prv)
+and A,valid_id_mask
+or A,dp_opcode_msg
+ld (dpod_addr),A
+ld (dpoc_addr),A
 
 ; Set the channel indicator timer. We use the lower four bits of
 ; the channel ID to select one of the fifteen indicator lamps.
 ld HL,zero_channel_timer
 push H
-ld A,(msg_id)
-and A,0x0F
+ld A,(msg_id_prv)
+and A,valid_id_mask
 push A
 pop IX
 ld A,activity_linger
@@ -721,34 +848,28 @@ ld (IX),A
 ; store 255 for the timestamp rather than the current value of the interrupt 
 ; timer.
 seti
-ld A,(msg_id)
+ld A,(msg_id_prv)
 ld (msg_write_addr),A
-ld A,(msg_hi)
+ld A,(msg_hi_prv)
 ld (msg_write_addr),A
-ld A,(msg_lo)
+ld A,(msg_lo_prv)
 ld (msg_write_addr),A
 ld A,(irq_bits_addr)
 and A,0x01
-jp z,int_mrdy_ts
+jp z,st_msg_ts
 ld A,255
-jp int_mrdy_stts
-int_mrdy_ts:
+jp st_msg_stts
+st_msg_ts:
 ld A,(irq_tmr1_addr)
-int_mrdy_stts:
+st_msg_stts:
 ld (msg_write_addr),A
 clri
 
-; Transmit a message to the display panel. The eight-bit message consists
-; of an operation code in the top four bits with value 0x1 and the lower
-; four bits of the message identifier.
-ld A,(msg_id)
-and A,0x0F
-or A,0x10
-ld (dpod_addr),A
-ld (dpoc_addr),A
-
-; Pop the registers and flags off the stack.
-read_message_done:
+; Set the previous message ID to zero to mark it as written. Pop 
+; the registers and flags off the stack.
+st_msg_done:
+ld A,0x00
+ld (msg_id_prv),A
 pop IY
 pop IX
 pop L

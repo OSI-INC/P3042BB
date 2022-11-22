@@ -12,7 +12,8 @@
 -- V2.1, 20-NOV-22: Eliminate INCOMING, change RECEIVED into MRDY. 
 -- We make MRDY available in the CPU memory and as a CPU interrupt.
 -- The logic is now designed to support the TCB readout of all 
--- messages received by individual, independent detector modules.
+-- messages received by individual, independent detector modules. Update
+-- Reset Arbitrator to cooperate with the Display Panel.
 
 -- Global constants and types.  
 library ieee;  
@@ -60,8 +61,8 @@ entity main is
 
 -- Version numbers.
 	constant hardware_id : integer := 42;
-	constant hardware_version : integer := 0;
-	constant firmware_version : integer := 1;
+	constant hardware_version : integer := 1;
+	constant firmware_version : integer := 2;
 
 -- Configuration of OSR8.
 	constant prog_addr_len : integer := 13;

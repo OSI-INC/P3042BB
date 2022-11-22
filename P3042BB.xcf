@@ -20,8 +20,8 @@
 				<BScanVal>0</BScanVal>
 			</Bypass>
 			<File>C:/Kevan/A3042/P3042BB/impl1/P3042BB_impl1.jed</File>
-			<FileTime>09/16/22 14:55:11</FileTime>
-			<JedecChecksum>0x8F55</JedecChecksum>
+			<FileTime>11/22/22 10:56:42</FileTime>
+			<JedecChecksum>0x0333</JedecChecksum>
 			<Operation>FLASH Erase,Program,Verify</Operation>
 			<Option>
 				<SVFVendor>JTAG STANDARD</SVFVendor>
@@ -50,6 +50,8 @@
 		<USBID>\\?\usb#vid_1134&amp;amp;pid_8001#5&amp;amp;2527471&amp;amp;0&amp;amp;1#</USBID>
 		<JTAGPinSetting>
 			TRST	ABSENT;
+			ISPEN	HIGH;
 		</JTAGPinSetting>
+		<ISPENConnect value="TRUE"/>
 	</CableOptions>
 </ispXCF>
