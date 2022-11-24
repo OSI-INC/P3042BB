@@ -994,16 +994,16 @@ begin
 		elsif rising_edge(SCK) then
 		
 			case state is
-				when 3 | 5 | 7 | 9 | 11 | 13 | 15 | 17 => 
+				when 2 | 4 | 6 | 8 | 10 | 12 | 14 | 16 => 
 					dp_in(7 downto 1) <= dp_in(6 downto 0);
-					dp_in(0) <= RSDI; 
+					dp_in(0) <= FSDI; 
 				when others => dp_in <= dp_in;
 			end case;
 			
 			case state is 
 				when 0 => 
 					DPIRDY <= false;
-					if (FSDI = '1') then 
+					if (RSDI = '1') then 
 						state := 1; 
 					else
 						state := 0;
