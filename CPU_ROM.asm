@@ -33,16 +33,14 @@ const relay_rc2_addr 0x1E13 ; Repeat Counter Byte 2 (Read)
 const relay_rc1_addr 0x1E14 ; Repeat Counter Byte 1 (Read)
 const relay_rc0_addr 0x1E15 ; Repeat Counter Byte 0 (Read)
 const comm_status_addr 0x1E16 ; Communication Status Register (Read)
+const dpcr_addr 0x1E17 ; Display Panel Configuration Request (Write)
 const fifo_empty_addr 0x1E1A ; Fifo Nearly Empty (Read)
 const irq_tmr2_max_addr 0x1E1B ; Interrupt Timer Two Period Minus One (Read/Write)
 const irq_tmr2_addr 0x1E1C ; Interrupt Counter Value (Read)
 const fv_addr 0x1E1D ; Firmware Version number (Read)
 const zero_indicator_addr 0x1E20 ; Zero channel indicator (Write)
-const dpoc_addr 0x1E40 ; Display Panel Output Control
-const dpod_addr 0x1E41 ; Display Panel Output Data
-const dpis_addr 0x1E42 ; Display Panel Input Status
-const dpid_addr 0x1E43 ; Display Panel Input Data
-const dpir_addr 0x1E44 ; Display Panel Input Read
+const dpod_addr 0x1E40 ; Display Panel Output Data (Write)
+const dpid_addr 0x1E41 ; Display Panel Input Data (Read)
 
 ; Controller job numbers.
 const read_job 3
@@ -62,10 +60,13 @@ const int_lamps_mask 0x08
 const int_dmerr_mask 0x04
 const int_unused_mask 0xF0
 const valid_id_mask 0x0F
+const config_bit_mask 0x01
+const dpirdy_bit_mask 0x10
 
 ; Display panel opcodes
 const dp_opcode_msg 0x10
-const dp_opcode_comms 0x20
+const dp_opcode_comm 0x20
+const dp_opcode_sw 0x60
 
 ; Hardware Constants.
 const num_indicators 15
@@ -115,7 +116,7 @@ const msg_pwr_prv 0x0003 ; Previous Message Power
 const msg_an_prv  0x0004 ; Previous Message Antenna Number
 const clock_hi    0x0020 ; Clock HI
 const clock_lo    0x0021 ; Clock LO
-const ts_cntr     0x0022 ; Time Stamp Counter
+const main_cntr   0x0022 ; Main Loop Counter
 const zero_channel_select 0x0200 ; Base of channel select array
 const zero_channel_timer 0x0300 ; Base of channel timer array
 
@@ -277,11 +278,77 @@ or A,0x01
 ld (test_point_addr),A   
 
 ; ---------------------------------------------------------------
+; Increment the main loop counter, which we can use to manage
+; tasks that require less frequency attention.
+; ---------------------------------------------------------------
+ld A,(main_cntr)
+inc A
+ld (main_cntr),A
+
+; ---------------------------------------------------------------
+; Manage communication with the display panel. We alternate between
+; transmitting a serial instruction to the display panel and 
+; reading an instruction from the display panel.
+; ---------------------------------------------------------------
+
+; Check timer to see if we should transmit to display panel.
+main_dp_comms:
+ld A,(main_cntr)
+sub A,0x40
+jp nz,main_dpi
+
+; Transmit the lower four bits of the communication status register
+; to the display panel. We combine these four bits with the communication
+; op-code and write to dpod_addr, which sets the data bits and initiates 
+; transmission.
+ld A,(comm_status_addr)
+and A,0x0F
+or A,dp_opcode_comm
+ld (dpod_addr),A
+jp main_message_handler
+
+; Check timer to see if we should check the display panel interface.
+main_dpi:
+ld A,(main_cntr)
+sub A,0x80
+jp nz,main_message_handler
+
+; Check to see if there is a new byte waiting from the display panel.
+ld A,(comm_status_addr)
+and A,dpirdy_bit_mask
+jp z,main_message_handler
+
+; Read the new byte, store in C.
+ld A,(dpid_addr)
+push A
+pop C
+
+; Check the opcode and execute display panel instruction.
+and A,0xF0
+sub A,dp_opcode_sw 
+jp nz,main_message_handler
+push C
+pop A
+and A,config_bit_mask
+jp z,main_dp_config
+ld A,0x01
+main_dp_config:
+ld (dpcr_addr),A
+jp main_message_handler
+
+; ---------------------------------------------------------------
+; The main loop handles message readout from the detector modules,
+; elimination of duplicates, and storage of these messages in the
+; message buffer. Each time we run through the main loop, we will
+; either do nothing, if no message is waiting, or read a message
+; and set it aside, or write a previous message to the buffer.
+; ---------------------------------------------------------------
+main_message_handler:
+
 ; Check the message ready flag, and it it's set, read a message from
 ; the daisy chain with the rd_msg routine. If it's not save any
 ; previous message that remains to be saved. If we read out a new
 ; message, compare to the previous message and act accordingly.
-; ---------------------------------------------------------------
 ld A,(dm_mrdy_addr)
 and A,0x01
 jp z,main_no_mrdy
@@ -819,12 +886,13 @@ push IY
 
 ; Transmit a message to the display panel. The eight-bit message consists
 ; of an operation code in the top four bits and the lower four bits of the 
-; message identifier.
+; message identifier. The transmission will take 9 us, which is 180 
+; instructions at 20 MHz. This routine will conclude in roughly 60
+; instructions.
 ld A,(msg_id_prv)
 and A,valid_id_mask
 or A,dp_opcode_msg
 ld (dpod_addr),A
-ld (dpoc_addr),A
 
 ; Set the channel indicator timer. We use the lower four bits of
 ; the channel ID to select one of the fifteen indicator lamps.

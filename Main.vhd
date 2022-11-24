@@ -15,6 +15,8 @@
 -- messages received by individual, independent detector modules. Update
 -- Reset Arbitrator to cooperate with the Display Panel.
 
+-- V2.2, 23-NOV-22: Add support for display panel configuration switch.
+
 -- Global constants and types.  
 library ieee;  
 use ieee.std_logic_1164.all;
@@ -100,6 +102,9 @@ architecture behavior of main is
 -- Indicator Signals
 	signal UPLOAD : boolean; -- Uploading To Relay
 	signal EMPTY : boolean; -- Message Buffer Empty
+	signal BBCONFIG : boolean; -- Base Board Requesting Reconfiguration
+	signal DPCONFIG : boolean; -- Display Panel Requesting Reconfiguration
+	signal CONFIG : boolean; -- Reconfiguration Requested
 
 -- Detector Modules
 	constant dm_buff_len : integer := 64;
@@ -178,17 +183,15 @@ architecture behavior of main is
 	constant relay_rc1_addr : integer := 20; -- Repeat Counter Byte 1 (Read)
 	constant relay_rc0_addr : integer := 21; -- Repeat Counter Byte 0 (Read)
 	constant comm_status_addr: integer := 22; -- Communication Status Register (Read)
+	constant dpcr_addr : integer := 23; -- Display Panel Configuration Request (Write)
 	constant irq_tmr2_max_addr : integer := 27; -- Timer Two Period Minus One (Read/Write)
 	constant irq_tmr2_addr : integer := 28; -- Timer Two value (Read)
 	constant fv_addr : integer := 29; -- Firmware Version number (Read)
 	constant indicators_addr : integer := 32; -- Indicator lamp array (Write)
 	constant indicator_low : integer := 1; -- Low index of CPU-controlled indicators
 	constant indicator_hi : integer := 15; -- High index of CPU-controlled indicators
-	constant dpoc_addr : integer := 64; -- Display Panel Output Control
-	constant dpod_addr : integer := 65; -- Display Panel Output Data
-	constant dpis_addr : integer := 66; -- Display Panel Input Status
-	constant dpid_addr : integer := 67; -- Display Panel Input Data
-	constant dpir_addr : integer := 68; -- Display Panel Input Read
+	constant dpod_addr : integer := 64; -- Display Panel Output Data (Write)
+	constant dpid_addr : integer := 65; -- Display Panel Input Data (Read)
 	
 	-- Relay Interface Registers.
 	signal cont_djr : std_logic_vector(7 downto 0); -- Device Job Register
@@ -221,8 +224,8 @@ architecture behavior of main is
 	
 -- Display Panel Interface
 	signal DPXMIT : boolean := false; -- Display Panel Data Transmit
-	signal DPRCV : boolean := false; -- Display Panel Data Received
-	signal DPIR : boolean := false; -- Display Panel Input Read
+	signal DPIRDY : boolean := false; -- Display Panel Input Ready
+	signal DPIR : boolean := false; -- Display Panel Input Has Been Read
 	signal dp_in, dp_out : std_logic_vector(7 downto 0);
 		
 -- General-Purpose Constant
@@ -600,8 +603,8 @@ begin
 			when test_point_addr => cpu_data_in <= tp_reg;
 			when dm_data_addr => cpu_data_in <= dub;
 			when dm_mrdy_addr => 
+				cpu_data_in <= (others => '0');
 				cpu_data_in(0) <= MRDY;
-				cpu_data_in(7 downto 1) <= (others => '0');
 			when relay_djr_addr => cpu_data_in <= cont_djr;
 			when relay_crhi_addr => cpu_data_in <= cont_cr(15 downto 8);
 			when relay_crlo_addr => cpu_data_in <= cont_cr(7 downto 0);
@@ -610,13 +613,12 @@ begin
 			when relay_rc1_addr => cpu_data_in <= cont_rc(15 downto 8);
 			when relay_rc0_addr => cpu_data_in <= cont_rc(7 downto 0);
 			when comm_status_addr => 
+				cpu_data_in <= (others => '0');
 				cpu_data_in(0) <= to_std_logic(UPLOAD);
 				cpu_data_in(1) <= to_std_logic(EMPTY);
 				cpu_data_in(2) <= ETH;
-				cpu_data_in(7 to 3) <= (others => '0');
-			when dpis_addr =>
-				cpu_data_in(0) <= to_std_logic(DPRCV);
-				cpu_data_in(7 downto 1) <= (others => '0');
+				cpu_data_in(3) <= to_std_logic(CONFIG);
+				cpu_data_in(4) <= to_std_logic(DPIRDY);
 			when dpid_addr => 
 				cpu_data_in <= dp_in;
 			when others => cpu_data_in <= max_data_byte;
@@ -634,7 +636,10 @@ begin
 		-- use of the Message Buffer Controller. On the next falling edge of PCK, if 
 		-- MWRACK is asserted, we clear MWRS, unless the very next rising edge carries
 		-- another write to msg_write_addr, in which case this clear of MWRS will be
-		-- over-ridden. 
+		-- over-ridden. When we read from a register, we might also set a flag to indicate
+		-- the data has been read. When we read from dpid_addr in the control space, we
+		-- get the value of the display panel data, but we also assert DPIR to reset the
+		-- display panel receiver.
 		if (RESET = '1') then 
 			irq_tmr1_max <= max_data_byte;
 			irq_tmr2_max <= max_data_byte;
@@ -648,6 +653,7 @@ begin
 			DMRST_BY_CPU <= true;
 			DPXMIT <= false;
 			DPIR <= false;
+			DPCONFIG <= false;
 			for i in 1 to 15 loop indicator_control(i) <= '0'; end loop;
 		elsif falling_edge(PCK) then
 			irq_rst <= zero_data_byte;
@@ -656,31 +662,39 @@ begin
 			DPXMIT <= false;
 			DPIR <= false;
 			if MWRACK then MWRS <= false; end if;
-			if CPUDS and CPUWR then 
+			if CPUDS then 
 				if (top_bits >= cpu_ctrl_base) 
 						and (top_bits <= cpu_ctrl_base+cpu_ctrl_range-1) then
-					case bottom_bits is
-						when irq_mask_addr => irq_mask <= cpu_data_out;
-						when irq_reset_addr => irq_rst <= cpu_data_out;
-						when irq_set_addr => irq_set <= cpu_data_out;
-						when irq_tmr1_max_addr => irq_tmr1_max <= cpu_data_out;
-						when irq_tmr2_max_addr => irq_tmr2_max <= cpu_data_out;
-						when cpu_rst_addr => RST_BY_CPU <= true;
-						when test_point_addr => tp_reg <= cpu_data_out;
-						when msg_write_addr => 
-							mwr_data <= cpu_data_out;
-							MWRS <= true;
-						when dm_reset_addr => DMRST_BY_CPU <= (cpu_data_out(0) = '1');
-						when dm_rc_addr => DMRC <= cpu_data_out(0);
-						when dm_strobe_addr => DSU <= cpu_data_out(0);
-						when relay_djr_rst_addr => DJRRST <= true;
-						when indicators_addr + 1 to indicators_addr + 15 =>
-							indicator_control(to_integer(unsigned(cpu_addr(3 downto 0)))) 
-								<= cpu_data_out(0);
-						when dpoc_addr => DPXMIT <= true;
-						when dpod_addr => dp_out <= cpu_data_out;
-						when dpir_addr => DPIR <= true;
-					end case;
+					if CPUWR then
+						case bottom_bits is
+							when irq_mask_addr => irq_mask <= cpu_data_out;
+							when irq_reset_addr => irq_rst <= cpu_data_out;
+							when irq_set_addr => irq_set <= cpu_data_out;
+							when irq_tmr1_max_addr => irq_tmr1_max <= cpu_data_out;
+							when irq_tmr2_max_addr => irq_tmr2_max <= cpu_data_out;
+							when cpu_rst_addr => RST_BY_CPU <= true;
+							when dpcr_addr => DPCONFIG <= (cpu_data_out(0) = '1');
+							when test_point_addr => tp_reg <= cpu_data_out;
+							when msg_write_addr => 
+								mwr_data <= cpu_data_out;
+								MWRS <= true;
+							when dm_reset_addr => DMRST_BY_CPU <= (cpu_data_out(0) = '1');
+							when dm_rc_addr => DMRC <= cpu_data_out(0);
+							when dm_strobe_addr => DSU <= cpu_data_out(0);
+							when relay_djr_rst_addr => DJRRST <= true;
+							when indicators_addr + 1 to indicators_addr + 15 =>
+								indicator_control(to_integer(unsigned(cpu_addr(3 downto 0)))) 
+									<= cpu_data_out(0);
+							when dpod_addr => 
+								dp_out <= cpu_data_out;
+								DPXMIT <= true;
+						end case;
+					end if;
+					if not CPUWR then
+						if (bottom_bits = dpid_addr) then 
+							DPIR <= true; 
+						end if;
+					end if;
 				end if;
 			end if;
 		end if;
@@ -808,6 +822,8 @@ begin
 	variable integer_addr : integer range 0 to 63;
 	begin
 		integer_addr := to_integer(unsigned(cont_addr));
+		BBCONFIG <= (switches(4) = '1');
+		CONFIG <=  BBCONFIG or DPCONFIG; 
 		
 		if RESET = '1' then
 			cont_data <= high_z_byte;
@@ -815,7 +831,7 @@ begin
 			MRDS <= false;
 			RST_BY_RELAY <= false;
 		elsif rising_edge(CK) then		
-			if CWR then cont_data <= high_z_byte; end if;
+			if CWR then cont_data <= high_z_byte; end if;			
 			
 			if CDS and CWR then
 				case integer_addr is
@@ -848,8 +864,8 @@ begin
 					cont_data <= std_logic_vector(to_unsigned(hardware_version,8));
 				when cont_fv_addr =>
 					cont_data <= std_logic_vector(to_unsigned(firmware_version,8));
-				when cont_cfsw_addr =>
-					cont_data(0) <= to_std_logic(switches(4) = '0');
+				when cont_cfsw_addr => -- The Relay looks for a zero to configure.
+					cont_data(0) <= to_std_logic(not CONFIG);
 				when cont_fifo_av_addr =>
 					if to_integer(unsigned(fifo_byte_count(20 downto 17))) = 0 then
 						cont_data <= fifo_byte_count(16 downto 9);
@@ -857,8 +873,8 @@ begin
 						cont_data <= max_data_byte;
 					end if;
 				when cont_fifo_ds_addr =>
+					cont_data <= (others => '0');
 					cont_data(0) <= to_std_logic(MRDACK);
-					cont_data(7 downto 1) <= (others => '0');
 				when cont_fifo_rd_addr =>
 					cont_data <= mrd_data;
 					MRDS <= false;
@@ -960,7 +976,8 @@ begin
 	-- Panel Received (DPRCV). When it sees Display Panel Input Read
 	-- (DPIR), it returns to its rest state. 
 	Display_Panel_Receiver : process (SCK,DPIR) is
-	variable state,next_state : integer range 0 to 31;
+	constant end_state : integer := 20;
+	variable state : integer range 0 to end_state;
 	variable RSDI, FSDI : std_logic;
 	begin
 		if falling_edge(SCK) then
@@ -972,27 +989,32 @@ begin
 		
 		if (RESET = '1') or DPIR then
 			state := 0;
-			DPRCV <= false;
+			DPIRDY <= false;
 			dp_in <= zero_data_byte;
 		elsif rising_edge(SCK) then
-			if state = 3 then dp_in(7) <= RSDI; end if;
-			if state = 5 then dp_in(6) <= RSDI; end if;
-			if state = 7 then dp_in(5) <= RSDI; end if;
-			if state = 9 then dp_in(4) <= RSDI; end if;
-			if state = 11 then dp_in(3) <= RSDI; end if;
-			if state = 13 then dp_in(2) <= RSDI; end if;
-			if state = 15 then dp_in(1) <= RSDI; end if;
-			if state = 17 then dp_in(0) <= RSDI; end if;
-			next_state := state + 1;
-			if state = 0 then
-				DPRCV <= false;
-				if (FSDI = '0') then next_state := 0; end if;
-			end if;
-			if state = 24 then
-				DPRCV <= true;
-				next_state := state;
-			end if;
-			state := next_state;
+		
+			case state is
+				when 3 | 5 | 7 | 9 | 11 | 13 | 15 | 17 => 
+					dp_in(7 downto 1) <= dp_in(6 downto 0);
+					dp_in(0) <= RSDI; 
+				when others => dp_in <= dp_in;
+			end case;
+			
+			case state is 
+				when 0 => 
+					DPIRDY <= false;
+					if (FSDI = '1') then 
+						state := 1; 
+					else
+						state := 0;
+					end if;
+				when end_state =>
+					DPIRDY <= true;
+					state := end_state;
+				when others =>
+					DPIRDY <= false;
+					state := state + 1;
+			end case;
 		end if;
 	end process;
 	
@@ -1002,7 +1024,6 @@ begin
 	constant end_count : integer := 255;
 	variable upload_state, empty_state : integer range 0 to end_count;
 	begin
-		
 		if (RESET = '1') then
 			UPLOAD <= false;
 			upload_state := 0;
@@ -1033,13 +1054,13 @@ begin
 		end if;
 	end process;
 	
-	-- Upload and Empty indicators are 16 and 17 respectively, but they 
-	-- are negative true.
+	-- Upload and Empty indicators are 16 and 17 respectively, negative true.
 	indicators(16) <= to_std_logic(not UPLOAD);
 	indicators(17) <= to_std_logic(not EMPTY);
 	
-	-- Configure lamp. Turns on when the config lamp output is '0'.
-	config_lamp <= to_std_logic(switches(4) = '0'); -- Configuration lamp and switch
+	-- Configure lamp, negative true. Turns on when we press either the base
+	-- board configuration switch or the Display Panel sends a CONFIG bit.
+	config_lamp <= to_std_logic(not CONFIG); 
 	
 	-- Ethernet activity and lamps. These turn on when their outputs are '1'.
 	EGRN <= '1';
@@ -1047,8 +1068,13 @@ begin
 	
 	-- Test points. We have TP1..TP3 showing the microprocessor-controlled registers 
 	-- zero through two. We have TP4 showing us any changes in the upstream data bus.
-	TP1 <= tp_reg(0);
-	TP2 <= tp_reg(1);
-	TP3 <= tp_reg(2);
-	TP4 <= dub(0) xor dub(1) xor dub(2) xor dub(3) xor dub(4) xor dub(5) xor dub(6) xor dub(7);
+--	TP1 <= tp_reg(0);
+--	TP2 <= tp_reg(1);
+--	TP3 <= tp_reg(2);
+--	TP4 <= dub(0) xor dub(1) xor dub(2) xor dub(3) xor dub(4) xor dub(5) xor dub(6) xor dub(7);
+TP1 <= dp_in(0);
+TP2 <= to_std_logic(DPIRDY);
+TP3 <= to_std_logic(DPIR);
+TP4 <= to_std_logic(DPXMIT);
+
 end behavior;
