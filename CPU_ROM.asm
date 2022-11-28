@@ -231,6 +231,15 @@ nop
 ld A,(fv_addr)
 add A,receiver_type
 ld (msg_write_addr),A
+nop
+nop
+ld A,0
+ld (msg_write_addr),A
+nop
+nop
+nop
+nop
+ld (msg_write_addr),A
 
 ; Configure interrupt timers.
 configure_interrupts:
@@ -382,7 +391,7 @@ push A
 pop B
 ld A,(msg_pwr)
 sub A,B
-jp np,main_done_messages
+jp c,main_done_messages
 
 ; With the new message having greater power, we overwrite the previous
 ; message with the new one, but we do not save to our message buffer.
@@ -632,7 +641,15 @@ ld (msg_write_addr),A
 ld A,(fv_addr)
 add A,receiver_type
 ld (msg_write_addr),A
-
+nop
+nop
+ld A,0
+ld (msg_write_addr),A
+nop
+nop
+nop
+nop
+ld (msg_write_addr),A
 
 ; Reset the timestamp interrupt.
 int_ts_done:
@@ -939,6 +956,10 @@ jp st_msg_stts
 st_msg_ts:
 ld A,(irq_tmr1_addr)
 st_msg_stts:
+ld (msg_write_addr),A
+ld A,(msg_pwr_prv)
+ld (msg_write_addr),A
+ld A,(msg_an_prv)
 ld (msg_write_addr),A
 clri
 
