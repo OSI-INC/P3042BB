@@ -990,10 +990,12 @@ begin
 		if (RESET = '1') or DPIR then
 			state := 0;
 			DPIRDY <= false;
-			dp_in <= zero_data_byte;
+			dp_in <= dp_in;
 		elsif rising_edge(SCK) then
 		
 			case state is
+				when 1 =>
+					dp_in <= (others => '0');
 				when 2 | 4 | 6 | 8 | 10 | 12 | 14 | 16 => 
 					dp_in(7 downto 1) <= dp_in(6 downto 0);
 					dp_in(0) <= FSDI; 
@@ -1068,13 +1070,8 @@ begin
 	
 	-- Test points. We have TP1..TP3 showing the microprocessor-controlled registers 
 	-- zero through two. We have TP4 showing us any changes in the upstream data bus.
---	TP1 <= tp_reg(0);
---	TP2 <= tp_reg(1);
---	TP3 <= tp_reg(2);
---	TP4 <= dub(0) xor dub(1) xor dub(2) xor dub(3) xor dub(4) xor dub(5) xor dub(6) xor dub(7);
-TP1 <= dp_in(0);
-TP2 <= to_std_logic(DPIRDY);
-TP3 <= to_std_logic(DPIR);
-TP4 <= to_std_logic(DPXMIT);
-
+	TP1 <= tp_reg(0);
+	TP2 <= tp_reg(1);
+	TP3 <= tp_reg(2);
+	TP4 <= dub(0) xor dub(1) xor dub(2) xor dub(3) xor dub(4) xor dub(5) xor dub(6) xor dub(7);
 end behavior;

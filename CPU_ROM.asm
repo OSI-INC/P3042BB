@@ -307,7 +307,7 @@ or A,dp_opcode_comm
 ld (dpod_addr),A
 jp main_message_handler
 
-; Check timer to see if we should check the display panel interface.
+; Check timer to see if we should read the display panel interface.
 main_dpi:
 ld A,(main_cntr)
 sub A,0x80
@@ -318,17 +318,18 @@ ld A,(comm_status_addr)
 and A,dpirdy_bit_mask
 jp z,main_message_handler
 
-; Read the new byte, store in C.
+; Read the new byte and store in C.
 ld A,(dpid_addr)
 push A
 pop C
 
 ; Check the opcode and execute display panel instruction.
-and A,0xF0
-sub A,dp_opcode_sw 
-jp nz,main_message_handler
-push C
-pop A
+; NOTE: In code below, we are not checking the opcode.
+;and A,0xF0
+;sub A,dp_opcode_sw 
+;jp nz,main_message_handler
+;push C
+;pop A
 and A,config_bit_mask
 jp z,main_dp_config
 ld A,0x01
@@ -617,23 +618,21 @@ ld (clock_hi),A
 ; and low bytes to the message buffer, followed by the receiver
 ; version. These four bytes are the clock message without any
 ; payload. We add "nop" instructions to give the message buffer
-; writes time to complete. We add two zeros for the power and
-; antenna number of the timestamp message.
+; writes time to complete. We need four clock cycles between
+; writes to the message buffer. The "ld A,(nn)" instruction itself
+; takes four cycles, and is therefore sufficient. We add two zeros 
+; for the power and antenna number of the clock message.
 store_clock:
 ld A,0x00
 ld (msg_write_addr),A
-nop
-nop
 ld A,(clock_hi)
 ld (msg_write_addr),A
-nop
-nop
 ld A,(clock_lo)
 ld (msg_write_addr),A
-nop
 ld A,(fv_addr)
 add A,receiver_type
 ld (msg_write_addr),A
+
 
 ; Reset the timestamp interrupt.
 int_ts_done:
@@ -905,6 +904,14 @@ pop IX
 ld A,activity_linger
 ld (IX),A
 
+; Swap the daisy chain index, which we have so far been using as
+; our antenna number, for the antenna number given in our hardware
+; geometry drawings.
+; NOTE: for now we are just incrementing the antenna number.
+ld A,(msg_an_prv)
+inc A
+ld (msg_an_prv),A
+
 ; Store the message in the buffer. We disable interrupts during the write
 ; so that we do not conflict with the timestamp interrupt's writing of 
 ; clock messages to the same buffer. We pay particular attention to the
@@ -914,7 +921,9 @@ ld (IX),A
 ; bit will be set if and only if the timestamp has incremented without a 
 ; clock message being stored, so we check this bit, and if it is set, we 
 ; store 255 for the timestamp rather than the current value of the interrupt 
-; timer.
+; timer. We do not need to add any "nop" instructions between writes to
+; the message buffer because we have at least one "ld A,(nn)" between each
+; write, and these take four clock cycles.
 seti
 ld A,(msg_id_prv)
 ld (msg_write_addr),A
