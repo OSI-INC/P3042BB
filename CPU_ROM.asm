@@ -109,11 +109,11 @@ const msg_hi      0x0001 ; Message Data, HI
 const msg_lo      0x0002 ; Message Data, LO
 const msg_pwr     0x0003 ; Message Power
 const msg_an      0x0004 ; Message Antenna Number
-const msg_id_prv  0x0000 ; Previous Message Identifier
-const msg_hi_prv  0x0001 ; Previous Message Data, HI
-const msg_lo_prv  0x0002 ; Previous Message Data, LO
-const msg_pwr_prv 0x0003 ; Previous Message Power
-const msg_an_prv  0x0004 ; Previous Message Antenna Number
+const msg_id_prv  0x0005 ; Previous Message Identifier
+const msg_hi_prv  0x0006 ; Previous Message Data, HI
+const msg_lo_prv  0x0007 ; Previous Message Data, LO
+const msg_pwr_prv 0x0008 ; Previous Message Power
+const msg_an_prv  0x0009 ; Previous Message Antenna Number
 const clock_hi    0x0020 ; Clock HI
 const clock_lo    0x0021 ; Clock LO
 const main_cntr   0x0022 ; Main Loop Counter
@@ -355,8 +355,8 @@ jp main_message_handler
 ; ---------------------------------------------------------------
 main_message_handler:
 
-; Check the message ready flag, and it it's set, read a message from
-; the daisy chain with the rd_msg routine. If it's not save any
+; Check the message ready flag, and if it's set, read a message from
+; the daisy chain with the rd_msg routine. If it's not, save any
 ; previous message that remains to be saved. If we read out a new
 ; message, compare to the previous message and act accordingly.
 ld A,(dm_mrdy_addr)
@@ -386,12 +386,12 @@ jp nz,main_save_prv
 ; If the identifiers are the same, we compare their powers. If the
 ; new message power is less than or equal to the previous message
 ; power, we do nothing further.
-ld A,(msg_pwr_prv)
+ld A,(msg_pwr)
 push A
 pop B
-ld A,(msg_pwr)
+ld A,(msg_pwr_prv)
 sub A,B
-jp c,main_done_messages
+jp nc,main_done_messages
 
 ; With the new message having greater power, we overwrite the previous
 ; message with the new one, but we do not save to our message buffer.
@@ -401,7 +401,6 @@ jp main_overwrite_prv
 ; message locations.
 main_save_prv:
 call save_msg_prv
-jp main_overwrite_prv
 
 ; Overwrite the previous message with the new message.
 main_overwrite_prv:
@@ -424,11 +423,8 @@ ld A,(msg_id_prv)
 and A,valid_id_mask
 jp z,main_done_messages
 
-; Save the previous message and delete it.
+; Save the previous message.
 call save_msg_prv
-ld A,0
-ld (msg_id_prv),A
-jp main_done_messages
 
 ; Done with dealing with messages.
 main_done_messages:
@@ -883,7 +879,8 @@ ret
 ; --------------------------------------------------------------
 ; Store the previous message in the message buffer, enable an
 ; activity lamp on the base board, transmit a lamp activity 
-; notification to the display panel.
+; notification to the display panel, and zero the previous message
+; id to mark it as written.
 ; --------------------------------------------------------------
 save_msg_prv:
 
