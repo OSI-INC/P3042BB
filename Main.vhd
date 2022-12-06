@@ -184,14 +184,14 @@ architecture behavior of main is
 	constant relay_rc0_addr : integer := 21; -- Repeat Counter Byte 0 (Read)
 	constant comm_status_addr: integer := 22; -- Communication Status Register (Read)
 	constant dpcr_addr : integer := 23; -- Display Panel Configuration Request (Write)
-	constant dpod_addr : integer := 24; -- Display Panel Output Data (Write)
-	constant dpid_addr : integer := 25; -- Display Panel Input Data (Read)
 	constant irq_tmr2_max_addr : integer := 27; -- Timer Two Period Minus One (Read/Write)
 	constant irq_tmr2_addr : integer := 28; -- Timer Two value (Read)
 	constant fv_addr : integer := 29; -- Firmware Version number (Read)
 	constant indicators_addr : integer := 32; -- Indicator lamp array (Write)
 	constant indicator_low : integer := 1; -- Low index of CPU-controlled indicators
 	constant indicator_hi : integer := 15; -- High index of CPU-controlled indicators
+	constant dpod_addr : integer := 64; -- Display Panel Output Data (Write)
+	constant dpid_addr : integer := 65; -- Display Panel Input Data (Read)
 	
 	-- Relay Interface Registers.
 	signal cont_djr : std_logic_vector(7 downto 0); -- Device Job Register

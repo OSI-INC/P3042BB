@@ -34,13 +34,13 @@ const relay_rc1_addr 0x1E14 ; Repeat Counter Byte 1 (Read)
 const relay_rc0_addr 0x1E15 ; Repeat Counter Byte 0 (Read)
 const comm_status_addr 0x1E16 ; Communication Status Register (Read)
 const dpcr_addr 0x1E17 ; Display Panel Configuration Request (Write)
-const dpod_addr 0x1E18 ; Display Panel Output Data (Write)
-const dpid_addr 0x1E19 ; Display Panel Input Data (Read)
 const fifo_empty_addr 0x1E1A ; Fifo Nearly Empty (Read)
 const irq_tmr2_max_addr 0x1E1B ; Interrupt Timer Two Period Minus One (Read/Write)
 const irq_tmr2_addr 0x1E1C ; Interrupt Counter Value (Read)
 const fv_addr 0x1E1D ; Firmware Version number (Read)
 const zero_indicator_addr 0x1E20 ; Zero channel indicator (Write)
+const dpod_addr 0x1E40 ; Display Panel Output Data (Write)
+const dpid_addr 0x1E41 ; Display Panel Input Data (Read)
 
 ; Controller job numbers.
 const read_job 3
@@ -119,7 +119,6 @@ const clock_lo    0x0021 ; Clock LO
 const main_cntr   0x0022 ; Main Loop Counter
 const zero_channel_select 0x0200 ; Base of channel select array
 const zero_channel_timer 0x0300 ; Base of channel timer array
-const zero_index_antenna 0x0400 ; Base of antenna index map
 
 ; ------------------------------------------------------------
 ;                         START
@@ -167,56 +166,6 @@ ld (IX),A
 inc IX
 dec B
 jp nz,init_channel_select_loop
-
-; Set up the detector module index to antenna input mapping. 
-ld IX,zero_index_antenna
-ld A,index_0
-ld (IX),A
-inc IX
-ld A,index_1
-ld (IX),A
-inc IX
-ld A,index_2
-ld (IX),A
-inc IX
-ld A,index_3
-ld (IX),A
-inc IX
-ld A,index_4
-ld (IX),A
-inc IX
-ld A,index_5
-ld (IX),A
-inc IX
-ld A,index_6
-ld (IX),A
-inc IX
-ld A,index_7
-ld (IX),A
-inc IX
-ld A,index_8
-ld (IX),A
-inc IX
-ld A,index_9
-ld (IX),A
-inc IX
-ld A,index_10
-ld (IX),A
-inc IX
-ld A,index_11
-ld (IX),A
-inc IX
-ld A,index_12
-ld (IX),A
-inc IX
-ld A,index_13
-ld (IX),A
-inc IX
-ld A,index_14
-ld (IX),A
-inc IX
-ld A,index_15
-ld (IX),A
 
 ; Clear the previous message.
 ld A,0x00
@@ -383,13 +332,10 @@ ld A,(dpid_addr)
 push A
 pop C
 
-; Check the opcode. We recognise the switch state opcode.
+; Check the opcode and execute display panel instruction.
 and A,0xF0
 sub A,dp_opcode_sw 
 jp nz,main_message_handler
-
-; Check the configuration switch bit. Write this bit to the display
-; panel configuration request location.
 push C
 pop A
 and A,config_bit_mask
@@ -409,7 +355,7 @@ jp main_message_handler
 main_message_handler:
 
 ; Check the message ready flag, and if it's set, read a message from
-; the daisy chain with the rd_msg routine. If it's not, save any
+; the daisy chain with the rd_msg routine. If it's not save any
 ; previous message that remains to be saved. If we read out a new
 ; message, compare to the previous message and act accordingly.
 ld A,(dm_mrdy_addr)
@@ -439,21 +385,23 @@ jp nz,main_save_prv
 ; If the identifiers are the same, we compare their powers. If the
 ; new message power is less than or equal to the previous message
 ; power, we do nothing further.
-ld A,(msg_pwr)
+ld A,(msg_pwr_prv)
 push A
 pop B
-ld A,(msg_pwr_prv)
+ld A,(msg_pwr)
 sub A,B
-jp nc,main_done_messages
+jp c,main_done_messages
 
 ; With the new message having greater power, we overwrite the previous
 ; message with the new one, but we do not save to our message buffer.
 jp main_overwrite_prv
 
 ; Save the previous message and copy the new message into our previous
-; message locations.
+; message locations. Note that the save routine aborts if the previous
+; message is invalid.
 main_save_prv:
 call save_msg_prv
+jp main_overwrite_prv
 
 ; Overwrite the previous message with the new message.
 main_overwrite_prv:
@@ -932,8 +880,7 @@ ret
 ; --------------------------------------------------------------
 ; Store the previous message in the message buffer, enable an
 ; activity lamp on the base board, transmit a lamp activity 
-; notification to the display panel, and zero the previous message
-; id to mark it as written.
+; notification to the display panel.
 ; --------------------------------------------------------------
 save_msg_prv:
 
@@ -949,6 +896,12 @@ push H
 push L
 push IX
 push IY
+
+; Check that the previous message is valid. Don't store an invalid
+; message;
+ld A,(msg_id_prv)
+and A,valid_id_mask
+jp z,st_msg_done
 
 ; Transmit a message to the display panel. The eight-bit message consists
 ; of an operation code in the top four bits and the lower four bits of the 
@@ -972,15 +925,11 @@ ld A,activity_linger
 ld (IX),A
 
 ; Swap the daisy chain index, which we have so far been using as
-; our antenna number, for the antenna input number on the TCB
-; enclosure. During initialization, we set up a table specifying
-; the mapping from index to antenna. We use that table now.
-ld HL,zero_index_antenna
-push H
+; our antenna number, for the antenna number given in our hardware
+; geometry drawings.
+; NOTE: for now we are just incrementing the antenna number.
 ld A,(msg_an_prv)
-push A
-pop IX
-ld A,(IX)
+inc A
 ld (msg_an_prv),A
 
 ; Store the message in the buffer. We disable interrupts during the write
