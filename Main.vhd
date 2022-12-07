@@ -10,12 +10,14 @@
 -- all detector readout. 
 
 -- V2.1, 20-NOV-22: Eliminate INCOMING, change RECEIVED into MRDY. 
--- We make MRDY available in the CPU memory and as a CPU interrupt.
+-- We make MRDY available in the CPU memory and as a CPU DPXEMPTY
 -- The logic is now designed to support the TCB readout of all 
 -- messages received by individual, independent detector modules. Update
 -- Reset Arbitrator to cooperate with the Display Panel.
 
 -- V2.2, 23-NOV-22: Add support for display panel configuration switch.
+
+-- V3.2, 06-DEC-22: Add SDO transmit FIFO. 
 
 -- Global constants and types.  
 library ieee;  
@@ -184,14 +186,14 @@ architecture behavior of main is
 	constant relay_rc0_addr : integer := 21; -- Repeat Counter Byte 0 (Read)
 	constant comm_status_addr: integer := 22; -- Communication Status Register (Read)
 	constant dpcr_addr : integer := 23; -- Display Panel Configuration Request (Write)
+	constant dpod_addr : integer := 24; -- Display Panel Output Data (Write)
+	constant dpid_addr : integer := 25; -- Display Panel Input Data (Read)
 	constant irq_tmr2_max_addr : integer := 27; -- Timer Two Period Minus One (Read/Write)
 	constant irq_tmr2_addr : integer := 28; -- Timer Two value (Read)
 	constant fv_addr : integer := 29; -- Firmware Version number (Read)
 	constant indicators_addr : integer := 32; -- Indicator lamp array (Write)
 	constant indicator_low : integer := 1; -- Low index of CPU-controlled indicators
 	constant indicator_hi : integer := 15; -- High index of CPU-controlled indicators
-	constant dpod_addr : integer := 64; -- Display Panel Output Data (Write)
-	constant dpid_addr : integer := 65; -- Display Panel Input Data (Read)
 	
 	-- Relay Interface Registers.
 	signal cont_djr : std_logic_vector(7 downto 0); -- Device Job Register
@@ -223,10 +225,13 @@ architecture behavior of main is
 	signal SHOW : boolean := false;
 	
 -- Display Panel Interface
-	signal DPXMIT : boolean := false; -- Display Panel Data Transmit
-	signal DPIRDY : boolean := false; -- Display Panel Input Ready
-	signal DPIR : boolean := false; -- Display Panel Input Has Been Read
-	signal dp_in, dp_out : std_logic_vector(7 downto 0);
+	signal DPXWR : std_logic; -- Display Panel Transmit Write
+	signal DPXRD : std_logic; -- Display Panel Transmit Read
+	signal DPXEMPTY : std_logic; -- Display Panel Transmit FIFO Empty
+	signal DPXFULL : std_logic; -- Display Panel Transmit FIFO Full
+	signal DPIRDY : std_logic; -- Display Panel Input Ready
+	signal DPIR : std_logic; -- Display Panel Input Has Been Read
+	signal dp_in, dp_out: std_logic_vector(7 downto 0);
 		
 -- General-Purpose Constant
 	constant max_data_byte : std_logic_vector(7 downto 0) := "11111111";
@@ -561,6 +566,23 @@ begin
 			RESET => RESET,
 			CK => PCK
 		);
+		
+-- The Serial Data Out First-In First-Out (SDO FIFO) buffer. The CPU writes
+-- to the FIFO and the Display Panel Transmitter takes the bytes out one by
+-- one and transmits them.
+	SDO_FIFO : entity FIFO32
+		port map (
+			Data => cpu_data_out,
+			WrClock => not PCK,
+			RDClock => not SCK,
+			WrEn => DPXWR,
+			RdEn => DPXRD,
+			Reset => RESET,
+			RPReset => RESET,
+			Q => dp_out,
+			Empty => DPXEMPTY,
+			Full => DPXFULL
+		);
 	
 -- The Memory Manager maps eight-bit read and write access to Detector Module 
 -- daisy chain bus, and the registers of the relay interface, as well as the
@@ -618,7 +640,7 @@ begin
 				cpu_data_in(1) <= to_std_logic(EMPTY);
 				cpu_data_in(2) <= ETH;
 				cpu_data_in(3) <= to_std_logic(CONFIG);
-				cpu_data_in(4) <= to_std_logic(DPIRDY);
+				cpu_data_in(4) <= DPIRDY;
 			when dpid_addr => 
 				cpu_data_in <= dp_in;
 			when others => cpu_data_in <= max_data_byte;
@@ -646,21 +668,20 @@ begin
 			irq_mask <= zero_data_byte;
 			irq_rst <= zero_data_byte;
 			irq_set <= zero_data_byte;
-			dp_out <= zero_data_byte;
 			MWRS <= false;
 			DJRRST <= false;
 			RST_BY_CPU <= false;
 			DMRST_BY_CPU <= true;
-			DPXMIT <= false;
-			DPIR <= false;
+			DPXWR <= '0';
+			DPIR <= '0';
 			DPCONFIG <= false;
 			for i in 1 to 15 loop indicator_control(i) <= '0'; end loop;
 		elsif falling_edge(PCK) then
 			irq_rst <= zero_data_byte;
 			irq_set <= zero_data_byte;
 			DJRRST <= false;
-			DPXMIT <= false;
-			DPIR <= false;
+			DPXWR <= '0';
+			DPIR <= '0';
 			if MWRACK then MWRS <= false; end if;
 			if CPUDS then 
 				if (top_bits >= cpu_ctrl_base) 
@@ -685,14 +706,12 @@ begin
 							when indicators_addr + 1 to indicators_addr + 15 =>
 								indicator_control(to_integer(unsigned(cpu_addr(3 downto 0)))) 
 									<= cpu_data_out(0);
-							when dpod_addr => 
-								dp_out <= cpu_data_out;
-								DPXMIT <= true;
+							when dpod_addr => DPXWR <= '1';
 						end case;
 					end if;
 					if not CPUWR then
 						if (bottom_bits = dpid_addr) then 
-							DPIR <= true; 
+							DPIR <= '1'; 
 						end if;
 					end if;
 				end if;
@@ -920,27 +939,18 @@ begin
 	end process;
 	
 	-- The Display Panel Transmitter sends messages to the display panel
-	-- using SDO. When the CPU asserts DPXMIT for one CK cycle (50 ns),
-	-- the Display Panel Transmitter responds by transmitting the eight
-	-- bytes of the dp_out register at 1 Mbps. The SDO signal is usually
+	-- using SDO. When the SDO FIFO contains a byte, the transmitter 
+	-- reads the byte and transmits it at 1 Mbps. The SDO signal is usually
 	-- LO, so we begin with 2 us of guaranteed LO for set-up, then a 1-us 
-	-- HI for a start bit, and the eight data bits, 1 us each. We end with
-	-- a 1-us HI for a stop bit. Because the transmitter resets to its 
-	-- start state on RESET, the transmitter will transmit a zero byte 
-	-- immediately after reset. The CPU asserts DPXMIT for one CK cycle by 
-	-- writing any value to the Display Panel Output Control Register 
-	-- (dpoc_addr).
-	Display_Panel_Transmitter : process (SCK,DPXMIT) is 
-	variable state : integer range 0 to 31;
+	-- HI for a start bit, and the eight data bits, 1 us each. 
+	Display_Panel_Transmitter : process (SCK,RESET) is 
+	constant end_state : integer := 31;
+	variable state : integer range 0 to end_state;
 	begin
-		if (RESET = '1') or DPXMIT then
+		if (RESET = '1') then
 			state := 0;
 		elsif rising_edge(SCK) then
 			case state is
-				when 0 => SDO <= '0';
-				when 1 => SDO <= '0';
-				when 2 => SDO <= '0';
-				when 3 => SDO <= '0';
 				when 4 => SDO <= '1';
 				when 5 => SDO <= '1';
 				when 6 => SDO <= dp_out(7);
@@ -959,15 +969,25 @@ begin
 				when 19 => SDO <= dp_out(1);
 				when 20 => SDO <= dp_out(0);
 				when 21 => SDO <= dp_out(0);
-				when 22 => SDO <= '0';
-				when 23 => SDO <= '0';
-				when 24 => SDO <= '0';
+				when others => SDO <= '0';
 			end case;
-			if state < 24 then 
-				state := state + 1;
-			else
-				state := 24;
-			end if;
+			
+			DPXRD <= '0';
+			case state is
+				when 0 => 
+					if (DPXEMPTY = '0') then 
+						state := 1; 
+					else 
+						state := 0;
+					end if;
+				when 1 => 
+					DPXRD <= '1';
+					state := 2;
+				when end_state =>
+					state := 0;
+				when others =>
+					state := state + 1;
+			end case;
 		end if;
 	end process;
 	
@@ -987,9 +1007,9 @@ begin
 			RSDI := SDI_in;
 		end if;
 		
-		if (RESET = '1') or DPIR then
+		if (RESET = '1') or (DPIR = '1') then
 			state := 0;
-			DPIRDY <= false;
+			DPIRDY <= '0';
 			dp_in <= dp_in;
 		elsif rising_edge(SCK) then
 		
@@ -1004,17 +1024,17 @@ begin
 			
 			case state is 
 				when 0 => 
-					DPIRDY <= false;
+					DPIRDY <= '0';
 					if (RSDI = '1') then 
 						state := 1; 
 					else
 						state := 0;
 					end if;
 				when end_state =>
-					DPIRDY <= true;
+					DPIRDY <= '1';
 					state := end_state;
 				when others =>
-					DPIRDY <= false;
+					DPIRDY <= '0';
 					state := state + 1;
 			end case;
 		end if;

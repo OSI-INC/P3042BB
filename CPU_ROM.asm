@@ -34,13 +34,13 @@ const relay_rc1_addr 0x1E14 ; Repeat Counter Byte 1 (Read)
 const relay_rc0_addr 0x1E15 ; Repeat Counter Byte 0 (Read)
 const comm_status_addr 0x1E16 ; Communication Status Register (Read)
 const dpcr_addr 0x1E17 ; Display Panel Configuration Request (Write)
+const dpod_addr 0x1E18 ; Display Panel Output Data (Write)
+const dpid_addr 0x1E19 ; Display Panel Input Data (Read)
 const fifo_empty_addr 0x1E1A ; Fifo Nearly Empty (Read)
 const irq_tmr2_max_addr 0x1E1B ; Interrupt Timer Two Period Minus One (Read/Write)
 const irq_tmr2_addr 0x1E1C ; Interrupt Counter Value (Read)
 const fv_addr 0x1E1D ; Firmware Version number (Read)
 const zero_indicator_addr 0x1E20 ; Zero channel indicator (Write)
-const dpod_addr 0x1E40 ; Display Panel Output Data (Write)
-const dpid_addr 0x1E41 ; Display Panel Input Data (Read)
 
 ; Controller job numbers.
 const read_job 3
@@ -99,7 +99,6 @@ const activity_linger 4 ; Timer periods of light per message received
 const flash_linger 200 ; Timer periods for reset flash
 const daisy_chain_delay 10 ; PCK periods for daisy-chain round trip
 const dmrst_length 10 ; PCK periods for reset pulse
-const dp_xmit_delay 240 ; Twelve microseconds for serial transmission
 
 ; Message Identifiers
 const clock_id 0x00 ; Clock message identifier.
@@ -364,15 +363,11 @@ jp nz,main_dpi
 ; Transmit the lower four bits of the communication status register
 ; to the display panel. We combine these four bits with the communication
 ; op-code and write to dpod_addr, which sets the data bits and initiates 
-; transmission. We wait for dp_xmit_delay to make sure the transmission
-; is complete, before we move on to the message handler, which might
-; well cause its own transmission to the display panel.
+; transmission.
 ld A,(comm_status_addr)
 and A,0x0F
 or A,dp_opcode_comm
 ld (dpod_addr),A
-ld A,dp_xmit_delay
-dly A
 
 ; Check timer to see if we should read the display panel interface.
 main_dpi:
@@ -1040,10 +1035,10 @@ ld A,(msg_an_prv)
 ld (msg_write_addr),A
 clri
 
-; Set the previous message ID to zero to mark it as written. Pop 
+; Set the previous message ID to invalid_id to mark it as written. Pop 
 ; the registers and flags off the stack.
 st_msg_done:
-ld A,0x00
+ld A,invalid_id
 ld (msg_id_prv),A
 pop IY
 pop IX
