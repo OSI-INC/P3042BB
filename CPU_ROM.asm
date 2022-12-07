@@ -62,6 +62,8 @@ const int_unused_mask 0xF0
 const valid_id_mask 0x0F
 const config_bit_mask 0x01
 const dpirdy_bit_mask 0x10
+const show_bit_mask 0x020
+const hide_bit_mask 0x40
 
 ; Display panel opcodes
 const dp_opcode_msg 0x10
@@ -75,19 +77,19 @@ const num_detectors 16
 ; Daisy chain index to antenna input map. The constant index_0, for
 ; example, contains the antenna input number connected to the first
 ; detector module in the daisy chain.
-const index_0 1
-const index_1 2
-const index_2 3
-const index_3 4
-const index_4 5
-const index_5 6
-const index_6 7
-const index_7 8
-const index_8 9
-const index_9 10
-const index_10 11
-const index_11 12
-const index_12 13
+const index_0  13
+const index_1  11
+const index_2  9
+const index_3  6
+const index_4  4
+const index_5  3
+const index_6  2
+const index_7  1
+const index_8  5
+const index_9  8
+const index_10 7
+const index_11 10
+const index_12 12
 const index_13 14
 const index_14 15
 const index_15 16
@@ -97,7 +99,7 @@ const rck_per_ts 255 ; RCK periods per timestamp interrupt minus one
 const rck_per_lamps 15 ; RCK periods per lamp interrupt minus one
 const activity_linger 4 ; Timer periods of light per message received
 const flash_linger 200 ; Timer periods for reset flash
-const daisy_chain_delay 10 ; PCK periods for daisy-chain round trip
+const daisy_chain_delay 5 ; PCK periods for daisy-chain round trip
 const dmrst_length 10 ; PCK periods for reset pulse
 
 ; Message Identifiers
@@ -369,26 +371,25 @@ and A,0x0F
 or A,dp_opcode_comm
 ld (dpod_addr),A
 
-; Check timer to see if we should read the display panel interface.
+; Check to see if there is a new byte waiting from the display panel. If
+; not, jump to next task.
 main_dpi:
-ld A,(main_cntr)
-sub A,0x80
-jp nz,main_message_handler
-
-; Check to see if there is a new byte waiting from the display panel.
 ld A,(comm_status_addr)
 and A,dpirdy_bit_mask
 jp z,main_message_handler
 
-; Read the new byte and store in C.
+; Read the new byte received from the display panel and store in C.
 ld A,(dpid_addr)
 push A
 pop C
 
-; Check the opcode and execute display panel instruction.
+; Check the opcode. If not one we recognise, go to message handler.
 and A,0xF0
 sub A,dp_opcode_sw 
 jp nz,main_message_handler
+
+; Check configuration bit state and update the configuration flag
+; in the controller.
 push C
 pop A
 and A,config_bit_mask

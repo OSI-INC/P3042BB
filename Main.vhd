@@ -10,14 +10,14 @@
 -- all detector readout. 
 
 -- V2.1, 20-NOV-22: Eliminate INCOMING, change RECEIVED into MRDY. 
--- We make MRDY available in the CPU memory and as a CPU DPXEMPTY
--- The logic is now designed to support the TCB readout of all 
--- messages received by individual, independent detector modules. Update
--- Reset Arbitrator to cooperate with the Display Panel.
+-- We make MRDY available in the CPU memory. The logic is now designed 
+-- to support the TCB readout of all messages received by individual, 
+-- independent detector modules. Update Reset Arbitrator to cooperate 
+-- with the Display Panel.
 
 -- V2.2, 23-NOV-22: Add support for display panel configuration switch.
 
--- V3.2, 06-DEC-22: Add SDO transmit FIFO. 
+-- V3.2, 07-DEC-22: Add SDO transmit FIFO. Add SDI receiver FIFO.
 
 -- Global constants and types.  
 library ieee;  
@@ -66,7 +66,7 @@ entity main is
 -- Version numbers.
 	constant hardware_id : integer := 42;
 	constant hardware_version : integer := 1;
-	constant firmware_version : integer := 2;
+	constant firmware_version : integer := 3;
 
 -- Configuration of OSR8.
 	constant prog_addr_len : integer := 13;
@@ -229,9 +229,11 @@ architecture behavior of main is
 	signal DPXRD : std_logic; -- Display Panel Transmit Read
 	signal DPXEMPTY : std_logic; -- Display Panel Transmit FIFO Empty
 	signal DPXFULL : std_logic; -- Display Panel Transmit FIFO Full
-	signal DPIRDY : std_logic; -- Display Panel Input Ready
-	signal DPIR : std_logic; -- Display Panel Input Has Been Read
-	signal dp_in, dp_out: std_logic_vector(7 downto 0);
+	signal DPRWR : std_logic; -- Display Panel Receiver Write
+	signal DPRRD : std_logic; -- Display Panel Receiver Read
+	signal DPREMPTY : std_logic; -- Display Panel Receiver FIFO Empty
+	signal DPRFULL : std_logic; -- Display Panel Receiver FIFO Full
+	signal dp_in, dp_in_waiting, dp_out: std_logic_vector(7 downto 0);
 		
 -- General-Purpose Constant
 	constant max_data_byte : std_logic_vector(7 downto 0) := "11111111";
@@ -583,7 +585,24 @@ begin
 			Empty => DPXEMPTY,
 			Full => DPXFULL
 		);
-	
+
+-- The Serial Data In First-In First-Out (SDI FIFO) buffer. The Display
+-- Panel Receiver writes bytes into the FIFO and the CPU checks the
+-- DPRDY flag to see if a byte is waiting, then reads it out.
+	SDI_FIFO : entity FIFO32
+		port map (
+			Data => dp_in,
+			WrClock => not SCK,
+			RDClock => not PCK,
+			WrEn => DPRWR,
+			RdEn => DPRRD,
+			Reset => RESET,
+			RPReset => RESET,
+			Q => dp_in_waiting,
+			Empty => DPREMPTY,
+			Full => DPRFULL
+		);
+
 -- The Memory Manager maps eight-bit read and write access to Detector Module 
 -- daisy chain bus, and the registers of the relay interface, as well as the
 -- Random Access Memory, and Interrupt Handler. Byte ordering is big-endian 
@@ -640,9 +659,9 @@ begin
 				cpu_data_in(1) <= to_std_logic(EMPTY);
 				cpu_data_in(2) <= ETH;
 				cpu_data_in(3) <= to_std_logic(CONFIG);
-				cpu_data_in(4) <= DPIRDY;
+				cpu_data_in(4) <= not DPREMPTY;
 			when dpid_addr => 
-				cpu_data_in <= dp_in;
+				cpu_data_in <= dp_in_waiting;
 			when others => cpu_data_in <= max_data_byte;
 			end case;
 		when others =>
@@ -673,7 +692,6 @@ begin
 			RST_BY_CPU <= false;
 			DMRST_BY_CPU <= true;
 			DPXWR <= '0';
-			DPIR <= '0';
 			DPCONFIG <= false;
 			for i in 1 to 15 loop indicator_control(i) <= '0'; end loop;
 		elsif falling_edge(PCK) then
@@ -681,7 +699,7 @@ begin
 			irq_set <= zero_data_byte;
 			DJRRST <= false;
 			DPXWR <= '0';
-			DPIR <= '0';
+			DPRRD <= '0';
 			if MWRACK then MWRS <= false; end if;
 			if CPUDS then 
 				if (top_bits >= cpu_ctrl_base) 
@@ -711,7 +729,7 @@ begin
 					end if;
 					if not CPUWR then
 						if (bottom_bits = dpid_addr) then 
-							DPIR <= '1'; 
+							DPRRD <= '1'; 
 						end if;
 					end if;
 				end if;
@@ -995,7 +1013,7 @@ begin
 	-- display panel. When it receives a message, it asserts Display
 	-- Panel Received (DPRCV). When it sees Display Panel Input Read
 	-- (DPIR), it returns to its rest state. 
-	Display_Panel_Receiver : process (SCK,DPIR) is
+	Display_Panel_Receiver : process (SCK,RESET) is
 	constant end_state : integer := 20;
 	variable state : integer range 0 to end_state;
 	variable RSDI, FSDI : std_logic;
@@ -1007,34 +1025,44 @@ begin
 			RSDI := SDI_in;
 		end if;
 		
-		if (RESET = '1') or (DPIR = '1') then
+		if (RESET = '1') then
 			state := 0;
-			DPIRDY <= '0';
-			dp_in <= dp_in;
+			dp_in <= (others => '0');
 		elsif rising_edge(SCK) then
 		
 			case state is
 				when 1 =>
 					dp_in <= (others => '0');
-				when 2 | 4 | 6 | 8 | 10 | 12 | 14 | 16 => 
+				when 4 | 6 | 8 | 10 | 12 | 14 | 16 | 18 => 
 					dp_in(7 downto 1) <= dp_in(6 downto 0);
 					dp_in(0) <= FSDI; 
 				when others => dp_in <= dp_in;
 			end case;
 			
+			DPRWR <= '0';
 			case state is 
 				when 0 => 
-					DPIRDY <= '0';
-					if (RSDI = '1') then 
-						state := 1; 
-					else
+					if (RSDI = '0') then
+						state := 1;
+					else 
 						state := 0;
 					end if;
+				when 1 =>
+					if (RSDI = '0') then
+						state := 2;
+					else 
+						state := 0;
+					end if;
+				when 2 =>
+					if (RSDI = '1') then 
+						state := 3; 
+					else
+						state := 2;
+					end if;
 				when end_state =>
-					DPIRDY <= '1';
-					state := end_state;
+					DPRWR <= '1';
+					state := 0;
 				when others =>
-					DPIRDY <= '0';
 					state := state + 1;
 			end case;
 		end if;
