@@ -72,7 +72,7 @@ const dp_opcode_sw 0x60
 const num_indicators 15
 const num_detectors 16
 
-; Daisy chain index to antenna input map. The constant "index_0", for
+; Daisy chain index to antenna input map. The constant index_0, for
 ; example, contains the antenna input number connected to the first
 ; detector module in the daisy chain.
 const index_0 1
@@ -92,18 +92,20 @@ const index_13 14
 const index_14 15
 const index_15 16
 
-; Software Constants
-const sp_initial 0x1700 ; Bottom of the stack in RAM.
-
 ; Timinig Constants. RCK is 32.768 kHz, PCK is 20 MHz.
 const rck_per_ts 255 ; RCK periods per timestamp interrupt minus one
 const rck_per_lamps 15 ; RCK periods per lamp interrupt minus one
 const activity_linger 4 ; Timer periods of light per message received
 const flash_linger 200 ; Timer periods for reset flash
 const daisy_chain_delay 10 ; PCK periods for daisy-chain round trip
-const dmrst_length 10 ; PCK periods for reset pulse.
+const dmrst_length 10 ; PCK periods for reset pulse
+const dp_xmit_delay 240 ; Twelve microseconds for serial transmission
 
-; Variable Locations.
+; Message Identifiers
+const clock_id 0x00 ; Clock message identifier.
+const invalid_id 0xF0 ; Invalid message identifier
+
+; Variable, Constant, Array, and Stack Locations.
 const msg_id      0x0000 ; Message Identifier
 const msg_hi      0x0001 ; Message Data, HI
 const msg_lo      0x0002 ; Message Data, LO
@@ -119,6 +121,8 @@ const clock_lo    0x0021 ; Clock LO
 const main_cntr   0x0022 ; Main Loop Counter
 const zero_channel_select 0x0200 ; Base of channel select array
 const zero_channel_timer 0x0300 ; Base of channel timer array
+const zero_index_antenna 0x0400 ; Base of antenna mapping table
+const sp_initial 0x1700 ; Bottom of the stack in RAM.
 
 ; ------------------------------------------------------------
 ;                         START
@@ -167,9 +171,61 @@ inc IX
 dec B
 jp nz,init_channel_select_loop
 
-; Clear the previous message.
-ld A,0x00
+; Set up the detector module index to antenna input mapping. 
+ld IX,zero_index_antenna
+ld A,index_0
+ld (IX),A
+inc IX
+ld A,index_1
+ld (IX),A
+inc IX
+ld A,index_2
+ld (IX),A
+inc IX
+ld A,index_3
+ld (IX),A
+inc IX
+ld A,index_4
+ld (IX),A
+inc IX
+ld A,index_5
+ld (IX),A
+inc IX
+ld A,index_6
+ld (IX),A
+inc IX
+ld A,index_7
+ld (IX),A
+inc IX
+ld A,index_8
+ld (IX),A
+inc IX
+ld A,index_9
+ld (IX),A
+inc IX
+ld A,index_10
+ld (IX),A
+inc IX
+ld A,index_11
+ld (IX),A
+inc IX
+ld A,index_12
+ld (IX),A
+inc IX
+ld A,index_13
+ld (IX),A
+inc IX
+ld A,index_14
+ld (IX),A
+inc IX
+ld A,index_15
+ld (IX),A
+
+; Clear the previous message, setting its ID to invalid_id and its other
+; records to zero.
+ld A,invalid_id
 ld (msg_id_prv),A
+ld A,0x00
 ld (msg_hi_prv),A
 ld (msg_lo_prv),A
 ld (msg_pwr_prv),A
@@ -212,12 +268,11 @@ ld (dm_reset_addr),A
 ; Write a zero clock message into the message buffer. We use "nop" instructions
 ; as a delay between writes to the message buffer so as to allow the buffer time
 ; to store the messages.
-ld A,0x00
+ld A,clock_id
 ld (msg_write_addr),A
 nop
 nop
-nop
-nop
+ld A,0
 ld (msg_write_addr),A
 nop
 nop
@@ -309,12 +364,15 @@ jp nz,main_dpi
 ; Transmit the lower four bits of the communication status register
 ; to the display panel. We combine these four bits with the communication
 ; op-code and write to dpod_addr, which sets the data bits and initiates 
-; transmission.
+; transmission. We wait for dp_xmit_delay to make sure the transmission
+; is complete, before we move on to the message handler, which might
+; well cause its own transmission to the display panel.
 ld A,(comm_status_addr)
 and A,0x0F
 or A,dp_opcode_comm
 ld (dpod_addr),A
-jp main_message_handler
+ld A,dp_xmit_delay
+dly A
 
 ; Check timer to see if we should read the display panel interface.
 main_dpi:
@@ -350,41 +408,42 @@ jp main_message_handler
 ; elimination of duplicates, and storage of these messages in the
 ; message buffer. Each time we run through the main loop, we will
 ; either do nothing, if no message is waiting, or read a message
-; and set it aside, or write a previous message to the buffer.
+; and set it aside, or write a previous message to the buffer. See
+; diagram Message_Handler.jpg in A3042 documentation for states.
 ; ---------------------------------------------------------------
 main_message_handler:
 
-; Check the message ready flag, and if it's set, read a message from
-; the daisy chain with the rd_msg routine. If it's not save any
-; previous message that remains to be saved. If we read out a new
-; message, compare to the previous message and act accordingly.
+; Check the message ready (MRDY) flag. If it's not set, jump to main_no_mrdy.
 ld A,(dm_mrdy_addr)
 and A,0x01
 jp z,main_no_mrdy
+
+; Read the new message.
 call rd_msg
 
-; If the message is not valid, act as if there were no mrdy. An 
-; invalid message can arise from a break in the daisy chain, 
-; where an isolated detector module is asserting MRDY, but the
-; readout is all zeros from the break. Under these circumstances,
-; we will never see MRDY unasserted, so we have to carry on anyway.
+; Check if the new message is valid. If not, jump to main_no_mrdy. We 
+; treat an invalid message in the same way as no message because an invalid 
+; message can arise from a break in the daisy chain, where an isolated
+; detector module asserts MRDY, but the readout is all zeros downstream 
+; from the break. Under these circumstances, we will never see MRDY 
+; unasserted, and we must carry on anyway.
 ld A,(msg_id)
 and A,valid_id_mask
 jp z,main_no_mrdy
 
-; We compare a valid new message with our previous message. If
-; their identifiers differ, we save the previous message and keep 
-; the new one for later.
+; Check if the new message has the same ID as our previous message. If 
+; not, we jump to main_new_id.
 ld A,(msg_id)
 push A
 pop B
 ld A,(msg_id_prv)
 sub A,B
-jp nz,main_save_prv
+jp nz,main_new_id
 
-; If the identifiers are the same, we compare their powers. If the
-; new message power is less than or equal to the previous message
-; power, we do nothing further.
+; Check to see if the new message, whose ID is the same as the previous
+; message, has greater power. If not, we are done: we are going to igore
+; this message in our effort to remove duplicates and find the top 
+; antenna message.
 ld A,(msg_pwr_prv)
 push A
 pop B
@@ -392,18 +451,30 @@ ld A,(msg_pwr)
 sub A,B
 jp c,main_done_messages
 
-; With the new message having greater power, we overwrite the previous
-; message with the new one, but we do not save to our message buffer.
+; With the new message having greater power, we jump to main_overwrite_prv.
 jp main_overwrite_prv
 
-; Save the previous message and copy the new message into our previous
-; message locations. Note that the save routine aborts if the previous
-; message is invalid.
-main_save_prv:
+; Check to see if the previous message is valid. If not, jump to 
+; main_overwrite_prv.
+main_new_id:
+ld A,(msg_id_prv)
+and A,valid_id_mask
+jp z,main_overwrite_prv
+
+; Our previous message ID is valid and different from our new message ID, so
+; we store the previous message before jumping to main_overwrite_prv. The 
+; previous message may not be the top antenna message for its channel. We may
+; have several transmitters colliding, with messages coming in from all of 
+; them, alternating between channels as we read out the detector modules.
+; Such collisions are rare, but they will result in multiple messages from
+; the same channel being written to the message buffer. These duplicates
+; will be removed later, when the Neuroplayer applies our lwdaq_receiver 
+; routine to the data.
 call save_msg_prv
-jp main_overwrite_prv
 
-; Overwrite the previous message with the new message.
+; Overwrite the previous message with the new message. If we have not yet
+; saved the previous message, it will never be saved. Our new message has
+; become the previous message, so we jump to main_done_message.
 main_overwrite_prv:
 ld A,(msg_id)
 ld (msg_id_prv),A
@@ -417,14 +488,17 @@ ld A,(msg_an)
 ld (msg_an_prv),A
 jp main_done_messages
 
-; Without a message ready flag, we check if we have a previous message waiting
-; to be stored. If so, we will store it.
+; Now new message is ready. We check to see if the previous message is 
+; valid. If not, jump to main_done_messages.
 main_no_mrdy:
 ld A,(msg_id_prv)
 and A,valid_id_mask
 jp z,main_done_messages
 
-; Save the previous message.
+; No new message is ready. There is a lull in reception and our previous
+; message is valid. It is most likely the top antenna message. There is 
+; no need to wait for any further messages from its channel. Save it now,
+; and we are done.
 call save_msg_prv
 
 ; Done with dealing with messages.
@@ -629,7 +703,7 @@ ld (clock_hi),A
 ; takes four cycles, and is therefore sufficient. We add two zeros 
 ; for the power and antenna number of the clock message.
 store_clock:
-ld A,0x00
+ld A,clock_id
 ld (msg_write_addr),A
 ld A,(clock_hi)
 ld (msg_write_addr),A
@@ -788,15 +862,16 @@ ld (dm_strobe_addr),A
 ld A,daisy_chain_delay
 dly A
 
-; If the lower four bits of the message ID are zero, abandon the read. All
-; such ID values are reserved for internal use by the controller.
+; Check to see if the message ID is valid for a detector module. Message
+; IDs with the lower four bits zero are reserved for internal use of this
+; controller. All others are valid.
 ld A,(msg_id)
 and A,valid_id_mask
 jp z,rd_msg_terminate
 
 ; Check that this channel is among those enabled by the channel select
-; array. If not, set the message identifier to zero and terminate the
-; readout. 
+; array. If not, set the message identifier to the invalid identifier
+; and terminate the readout. 
 ld HL,zero_channel_select
 push H
 ld A,(msg_id)
@@ -805,7 +880,7 @@ pop IX
 ld A,(IX)
 sub A,0x00
 jp nz,rd_msg_continue
-ld A,0x00
+ld A,invalid_id
 ld (msg_id),A
 jp rd_msg_terminate
 
@@ -880,7 +955,8 @@ ret
 ; --------------------------------------------------------------
 ; Store the previous message in the message buffer, enable an
 ; activity lamp on the base board, transmit a lamp activity 
-; notification to the display panel.
+; notification to the display panel. Note that this routine will
+; store any previous message, valid or not.
 ; --------------------------------------------------------------
 save_msg_prv:
 
@@ -896,12 +972,6 @@ push H
 push L
 push IX
 push IY
-
-; Check that the previous message is valid. Don't store an invalid
-; message;
-ld A,(msg_id_prv)
-and A,valid_id_mask
-jp z,st_msg_done
 
 ; Transmit a message to the display panel. The eight-bit message consists
 ; of an operation code in the top four bits and the lower four bits of the 
@@ -925,11 +995,15 @@ ld A,activity_linger
 ld (IX),A
 
 ; Swap the daisy chain index, which we have so far been using as
-; our antenna number, for the antenna number given in our hardware
-; geometry drawings.
-; NOTE: for now we are just incrementing the antenna number.
+; our antenna number, for the antenna input number on the TC
+; enclosure. During initialization, we set up a table specifying
+; the mapping from index to antenna. We use that table now.
+ld HL,zero_index_antenna
+push H
 ld A,(msg_an_prv)
-inc A
+push A
+pop IX
+ld A,(IX)
 ld (msg_an_prv),A
 
 ; Store the message in the buffer. We disable interrupts during the write
