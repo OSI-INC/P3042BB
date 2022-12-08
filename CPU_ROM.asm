@@ -830,14 +830,8 @@ rd_msg:
 ; have to worry about which ones we use in the interrupt.
 push F 
 push A
-push B
-push C
-push D
-push E
 push H
-push L
 push IX
-push IY
 
 ; Assert Detector Module Read Control (DMRC) to start the read cycle. 
 ; We wait a while to allow the daisy chain data strobe lines to settle.
@@ -855,37 +849,11 @@ ld A,(dm_data_addr)
 ld (msg_id),A
 ld A,0x00
 ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-
-; Check to see if the message ID is valid for a detector module. Message
-; IDs with the lower four bits zero are reserved for internal use of this
-; controller. All others are valid.
-ld A,(msg_id)
-and A,valid_id_mask
-jp z,rd_msg_terminate
-
-; Check that this channel is among those enabled by the channel select
-; array. If not, set the message identifier to the invalid identifier
-; and terminate the readout. 
-ld HL,zero_channel_select
-push H
-ld A,(msg_id)
-push A
-pop IX
-ld A,(IX)
-sub A,0x00
-jp nz,rd_msg_continue
-ld A,invalid_id
-ld (msg_id),A
-jp rd_msg_terminate
 
 ; Read the HI data byte.
 rd_msg_continue:
 ld A,0x01               
 ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
 ld A,(dm_data_addr)
 ld (msg_hi),A
 ld A,0x00
@@ -896,8 +864,6 @@ dly A
 ; Read the LO data byte.
 ld A,0x01               
 ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
 ld A,(dm_data_addr)
 ld (msg_lo),A
 ld A,0x00
@@ -908,8 +874,6 @@ dly A
 ; Read the detector power.
 ld A,0x01               
 ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
 ld A,(dm_data_addr)
 ld (msg_pwr),A
 ld A,0x00
@@ -920,14 +884,37 @@ dly A
 ; Read the antenna number.
 ld A,0x01               
 ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
 ld A,(dm_data_addr)
 ld (msg_an),A
 ld A,0x00
 ld (dm_strobe_addr),A
 ld A,daisy_chain_delay
 dly A
+
+; Check to see if the message ID is valid for a detector module. Message
+; IDs with the lower four bits zero are reserved for internal use of this
+; controller. All others are valid.
+ld A,(msg_id)
+and A,valid_id_mask
+jp nz,rd_msg_csel
+ld A,invalid_id
+ld (msg_id),A
+jp rd_msg_terminate
+
+; Check that this channel is among those enabled by the channel select
+; array. If not, set the message identifier to the invalid identifier
+; and terminate the readout. 
+rd_msg_csel:
+ld HL,zero_channel_select
+push H
+ld A,(msg_id)
+push A
+pop IX
+ld A,(IX)
+sub A,0x00
+jp rd_msg_terminate
+ld A,invalid_id
+ld (msg_id),A
 
 ; Unassert Detector Module Read Control
 rd_msg_terminate:
@@ -936,14 +923,8 @@ ld (dm_rc_addr),A
 
 ; Pop the registers and flags off the stack.
 rd_msg_done:
-pop IY
 pop IX
-pop L
 pop H
-pop E
-pop D
-pop C
-pop B
 pop A
 pop F
 ret
@@ -960,14 +941,8 @@ save_msg_prv:
 ; have to worry about which ones we use in the interrupt.
 push F 
 push A
-push B
-push C
-push D
-push E
 push H
-push L
 push IX
-push IY
 
 ; Transmit a message to the display panel. The eight-bit message consists
 ; of an operation code in the top four bits and the lower four bits of the 
@@ -1041,14 +1016,8 @@ clri
 st_msg_done:
 ld A,invalid_id
 ld (msg_id_prv),A
-pop IY
 pop IX
-pop L
 pop H
-pop E
-pop D
-pop C
-pop B
 pop A
 pop F
 ret
