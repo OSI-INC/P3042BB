@@ -1,5 +1,5 @@
 SCUBA, Version Diamond (64-bit) 3.12.1.454
-Thu Dec 08 22:45:02 2022
+Fri Dec 09 08:54:36 2022
   
 Copyright (c) 1991-1994 by NeoCAD Inc. All rights reserved.
 Copyright (c) 1995 AT&T Corp.   All rights reserved.
@@ -9,12 +9,12 @@ Copyright (c) 2002-2020 Lattice Semiconductor Corporation,  All rights reserved.
   
 BEGIN SCUBA Module Synthesis
   
-    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_ROM -lang vhdl -synth lse -bus_exp 7 -bb -arch xo2c00 -type romblk -device LCMXO2-7000HC -addr_width 13 -data_width 8 -num_words 8192 -cascade -1 -memfile c:/kevan/a3042/p3042bb/cpu_rom.mem -memformat hex 
+    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_ROM -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type romblk -device LCMXO2-7000HC -addr_width 11 -data_width 8 -num_words 2048 -cascade -1 -memfile c:/kevan/a3042/p3042bb/cpu_rom.mem -memformat hex 
     Circuit name     : CPU_ROM
     Module type      : EBR_ROM
     Module Version   : 5.4
     Ports            : 
-    Inputs       : Address[12:0], OutClock, OutClockEn, Reset
+    Inputs       : Address[10:0], OutClock, OutClockEn, Reset
     Outputs      : Q[7:0]
     I/O buffer       : not inserted
     Memory file      : c:/kevan/a3042/p3042bb/cpu_rom.mem
@@ -26,7 +26,7 @@ BEGIN SCUBA Module Synthesis
     Bus notation     : big endian
     Report output    : CPU_ROM.srp
     Estimated Resource Usage:
-            EBR : 8
+            EBR : 2
   
 END   SCUBA Module Synthesis
 

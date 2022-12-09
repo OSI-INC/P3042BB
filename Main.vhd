@@ -19,7 +19,15 @@
 
 -- V3.2, 07-DEC-22: Add SDO transmit Buffer. Add SDI receiver Buffer.
 
--- V3.3, 08-DEC-22: Add Detector Module Buffer.
+-- V3.3, 08-DEC-22: Add Detector Module Buffer. Reduce program memory to 
+-- 2 KByte so code will ultimately fit into a 4000ZE chip. Detector
+-- Module Interface reads out the daisy chain and rejects invalide
+-- message before storing in the buffer. Message reading greatly 
+-- simplified in the CPU. Correct bug in implementation of channel
+-- selection in CPU code. Our main loop, when eliminating duplicates
+-- takes 120 PCK cycles. Running with PCK = 20 MHz in the 7000HC chip,
+-- maximum message rate is around 160 kMPS. Running with PCK = 10 MHz
+-- in the 4000ZE chip, message rate drops to 80 kMPS.
 
 -- Global constants and types.  
 library ieee;  
@@ -71,7 +79,7 @@ entity main is
 	constant firmware_version : integer := 3;
 
 -- Configuration of OSR8.
-	constant prog_addr_len : integer := 13;
+	constant prog_addr_len : integer := 11;
 	constant cpu_addr_len : integer := 13;
 	constant ram_addr_len : integer := 13;
 	constant start_pc : integer := 0;
@@ -581,7 +589,7 @@ begin
 -- The Serial Data Out Buffer (SDO Buffer) buffer is where the CPU writes 
 -- bytes it wants the Display Panel Transmitter to serialize for the
 -- Display panel.
-	SDO_Buffer : entity FIFO32
+	SDO_Buffer : entity FIFO8
 		port map (
 			Data => cpu_data_out,
 			WrClock => not PCK,
@@ -598,7 +606,7 @@ begin
 -- Panel Receiver writes bytes for the CPU to read out. The
 -- CPU checks the DPREMPTY flag to see if a byte is waiting, 
 -- then reads it out.
-	SDI_Buffer : entity FIFO32
+	SDI_Buffer : entity FIFO8
 		port map (
 			Data => dp_in,
 			WrClock => not SCK,
@@ -615,7 +623,7 @@ begin
 -- messages for the CPU to read out and subsequently write into the
 -- Message Buffer. It is five bytes wide. When it's Empty flag is 
 -- not set, a message is ready to read.
-	DM_Buffer : entity FIFO5x128
+	DM_Buffer : entity FIFO40
 		port map (
         Data => dmb_in,
         WrClock => not SCK,
@@ -957,17 +965,21 @@ begin
 	end process;
 	
 	-- The Detector Module Interface watches for MRDY, which indicates
-	-- that one or more detector modules has a message ready for
-	-- readout. It reads the five bytes of the front message, as 
-	-- presented by daisy chain, and stores them in the Detector
-	-- Module Buffer, first byte in the top eight bits, last byte 
-	-- in the bottom eight bits, of the forty-bit buffer word, then
-	-- asserts DMBWR to write the word into the buffer. The interface
-	-- runs off SCK, which has period 500 ns. It asserts Detector 
-	-- Module Read Control (DMRC) to start the read, as required by the 
-	-- daisy chain protocol. It asserts Data Strobe Upstream (DSU) to
-	-- get the first byte. Subsequent DS cycles get the remaining bytes.
-	-- Total read time is 500 ns * 13 = 6.5 us.
+	-- that one or more detector modules has a message ready for readout
+	-- It reads the first byte of the front message and checks if it's a 
+	-- valid ID byte. If not, the process ends the readout and returns
+	-- to its rest state. If valid, the interface reads the remaining
+	-- four bytes. It stores the first byte of the message in the top
+	-- eight bits. The last is in the bottom eight bits. The write occurs 
+	-- on the falling edge of SCK when DMBWR is asserted. The interface 
+	-- runs off SCK, which has period 500 ns. It asserts Detector Module 
+	-- Read Control (DMRC) to start the read, as required by the daisy 
+	-- chain protocol. It asserts Data Strobe Upstream (DSU) to get the 
+	-- first byte. Subsequent DS cycles get the remaining bytes. Total read 
+	-- time is 500 ns * 13 = 6.5 us. In principle, the interface is active
+	-- only when a message is ready. But if one of the detector modules
+	-- fails, breaking the daisy-chain, those upstream will assert MRDY
+	-- continuously. 
 	Detector_Module_Interface : process (SCK,RESET) is
 	variable state, next_state : integer range 0 to 15;
 	begin
@@ -992,6 +1004,9 @@ begin
 				when 3 => 
 					DMRC <= '1'; DSU <= '0'; dmb_in(39 downto 32) <= dub;
 				when 4 => 
+					if (dmb_in(35 downto 32) = "0000") then
+						next_state := 0;
+					end if;
 					DMRC <= '1'; DSU <= '1';
 				when 5 => 
 					DMRC <= '1'; DSU <= '0'; dmb_in(31 downto 24) <= dub;

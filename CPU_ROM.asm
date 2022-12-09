@@ -338,7 +338,7 @@ main:
 
 ; ---------------------------------------------------------------
 ; Generate a rising edge on tp_reg(0) to indicate the main loop is
-; starting.
+; starting. 9CK
 ; ---------------------------------------------------------------
 ld A,(test_point_addr)
 or A,0x01                    
@@ -346,7 +346,7 @@ ld (test_point_addr),A
 
 ; ---------------------------------------------------------------
 ; Increment the main loop counter, which we can use to manage
-; tasks that require less frequency attention.
+; tasks that require less frequency attention. 8CK
 ; ---------------------------------------------------------------
 ld A,(main_cntr)
 inc A
@@ -358,7 +358,7 @@ ld (main_cntr),A
 ; reading an instruction from the display panel.
 ; ---------------------------------------------------------------
 
-; Check timer to see if we should transmit to display panel.
+; Check timer to see if we should transmit to display panel. 9CK
 main_dp_comms:
 ld A,(main_cntr)
 sub A,0x40
@@ -367,14 +367,14 @@ jp nz,main_dpi
 ; Transmit the lower four bits of the communication status register
 ; to the display panel. We combine these four bits with the communication
 ; op-code and write to dpod_addr, which sets the data bits and initiates 
-; transmission.
+; transmission. 
 ld A,(comm_status_addr)
 and A,0x0F
 or A,dp_opcode_comm
 ld (dpod_addr),A
 
 ; Check to see if there is a new byte waiting from the display panel. If
-; not, jump to next task.
+; not, jump to next task. 9CK
 main_dpi:
 ld A,(comm_status_addr)
 and A,dpirdy_bit_mask
@@ -411,26 +411,29 @@ jp main_message_handler
 ; ---------------------------------------------------------------
 main_message_handler:
 
-; Check the message ready (MRDY) flag. If it's not set, jump to main_no_mrdy.
+; Check the message ready (MRDY) flag. If it's not set, jump to 
+; main_no_mrdy. 9CK
 ld A,(comm_status_addr)
 and A,dmbrdy_bit_mask
 jp z,main_no_mrdy
 
-; Read the new message.
-call rd_msg
-
-; Check if the new message is valid. If not, jump to main_no_mrdy. We 
-; treat an invalid message in the same way as no message because an invalid 
-; message can arise from a break in the daisy chain, where an isolated
-; detector module asserts MRDY, but the readout is all zeros downstream 
-; from the break. Under these circumstances, we will never see MRDY 
-; unasserted, and we must carry on anyway.
-ld A,(msg_id)
-and A,valid_id_mask
-jp z,main_no_mrdy
+; Read the new message. We assert Detector Module Buffer Read (DMBRD) to 
+; read the message out of the Detector Module Buffer. This message is 
+; guaranteed by the Detector Module Interface to have a valid ID. 38CK
+ld (dmb_read_addr),A
+ld A,(dmb_id_addr)
+ld (msg_id),A
+ld A,(dmb_hi_addr)
+ld (msg_hi),A
+ld A,(dmb_lo_addr)
+ld (msg_lo),A
+ld A,(dmb_pwr_addr)
+ld (msg_pwr),A
+ld A,(dmb_an_addr)
+ld (msg_an),A
 
 ; Check if the new message has the same ID as our previous message. If 
-; not, we jump to main_new_id.
+; not, we jump to main_new_id. 14CK
 ld A,(msg_id)
 push A
 pop B
@@ -438,10 +441,9 @@ ld A,(msg_id_prv)
 sub A,B
 jp nz,main_new_id
 
-; Check to see if the new message, whose ID is the same as the previous
-; message, has greater power. If not, we are done: we are going to igore
-; this message in our effort to remove duplicates and find the top 
-; antenna message.
+; Check to see if the new message has greater power. If not, we ignore
+; this message. We are rejecting duplicates in our effort to fine the
+; top antenna. 12CK
 ld A,(msg_pwr_prv)
 push A
 pop B
@@ -494,9 +496,9 @@ and A,valid_id_mask
 jp z,main_done_messages
 
 ; No new message is ready. There is a lull in reception and our previous
-; message is valid. It is most likely the top antenna message. There is 
-; no need to wait for any further messages from its channel. Save it now,
-; and we are done.
+; message is valid. There is no need to wait for any further messages: this
+; message is most likely the top antenna message for its sample, and is
+; certainly the last message for the sample.
 call save_msg_prv
 
 ; Done with dealing with messages.
@@ -505,7 +507,7 @@ main_done_messages:
 ; ---------------------------------------------------------------
 ; Check the Device Job Register. If it's not zero, take action and 
 ; if requested action is complete, clear the register to indicate 
-; the job is done.
+; the job is done. 9CK
 ; ----------------------------------------------------------------
 ld A,(relay_djr_addr)
 add A,0x00
@@ -622,13 +624,14 @@ ld (relay_djr_rst_addr),A
 
 ; ---------------------------------------------------------------
 ; Generate a falling edge on tp_reg(0) to indicate the main loop is
-; done.
+; done. 9CK
 ; ---------------------------------------------------------------
 djr_done:   
 ld A,(test_point_addr)
 and A,0xFE                
 ld (test_point_addr),A  
 
+; Return to top of main loop. 3CK
 jp main 
 
 
@@ -822,69 +825,6 @@ rti
 ; Calling convention: calling process pushes anything it wants
 ; protected onto the stack before calling, and pops upon return.
 
-; --------------------------------------------------------------
-; Read a message from the detector module buffer and store
-; in the 'msg' variables.
-; --------------------------------------------------------------
-rd_msg:
-
-; Push all the flags and registers onto the stack so we don't
-; have to worry about which ones we use in the interrupt.
-push F 
-push A
-push H
-push IX
-
-; Assert Detector Module Buffer Read (DMBRD) to read the message out of
-; the Detector Module Buffer. We are assuming such a message exists: the
-; calling process must check the DMBRDY bit in the communication status
-; register. Any write to the DMB read location will do.
-ld (dmb_read_addr),A
-
-; Read the five bytes of the message.
-ld A,(dmb_id_addr)
-ld (msg_id),A
-ld A,(dmb_hi_addr)
-ld (msg_hi),A
-ld A,(dmb_lo_addr)
-ld (msg_lo),A
-ld A,(dmb_pwr_addr)
-ld (msg_pwr),A
-ld A,(dmb_an_addr)
-ld (msg_an),A
-
-; Check to see if the message ID is valid for a detector module. Message
-; IDs with the lower four bits zero are reserved for internal use of this
-; controller. All others are valid.
-ld A,(msg_id)
-and A,valid_id_mask
-jp nz,rd_msg_csel
-ld A,invalid_id
-ld (msg_id),A
-jp rd_msg_done
-
-; Check that this channel is among those enabled by the channel select
-; array. If not, set the message identifier to the invalid identifier
-; and terminate the readout. 
-rd_msg_csel:
-ld HL,zero_channel_select
-push H
-ld A,(msg_id)
-push A
-pop IX
-ld A,(IX)
-sub A,0x00
-jp rd_msg_done
-ld A,invalid_id
-ld (msg_id),A
-
-; Pop the registers and flags off the stack.
-rd_msg_done:
-pop IX
-pop H
-pop A
-pop F
-ret
 
 ; --------------------------------------------------------------
 ; Store the previous message in the message buffer, enable an
@@ -900,6 +840,18 @@ push F
 push A
 push H
 push IX
+
+; Check that this channel is among those enabled by the channel select
+; array. If not, set the message identifier to the invalid identifier
+; and terminate the readout. 
+ld HL,zero_channel_select
+push H
+ld A,(msg_id)
+push A
+pop IX
+ld A,(IX)
+sub A,0
+jp z,save_prv_done
 
 ; Transmit a message to the display panel. The eight-bit message consists
 ; of an operation code in the top four bits and the lower four bits of the 
@@ -955,12 +907,12 @@ ld A,(msg_lo_prv)
 ld (msg_write_addr),A
 ld A,(irq_bits_addr)
 and A,0x01
-jp z,st_msg_ts
+jp z,save_prv_ts
 ld A,255
-jp st_msg_stts
-st_msg_ts:
+jp save_prv_stts
+save_prv_ts:
 ld A,(irq_tmr1_addr)
-st_msg_stts:
+save_prv_stts:
 ld (msg_write_addr),A
 ld A,(msg_pwr_prv)
 ld (msg_write_addr),A
@@ -970,7 +922,7 @@ clri
 
 ; Set the previous message ID to invalid_id to mark it as written. Pop 
 ; the registers and flags off the stack.
-st_msg_done:
+save_prv_done:
 ld A,invalid_id
 ld (msg_id_prv),A
 pop IX
