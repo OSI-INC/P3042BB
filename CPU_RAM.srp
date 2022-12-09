@@ -1,5 +1,5 @@
 SCUBA, Version Diamond (64-bit) 3.12.1.454
-Tue Sep 13 08:45:42 2022
+Fri Dec 09 13:55:09 2022
 
 Copyright (c) 1991-1994 by NeoCAD Inc. All rights reserved.
 Copyright (c) 1995 AT&T Corp.   All rights reserved.
@@ -7,12 +7,12 @@ Copyright (c) 1995-2001 Lucent Technologies Inc.  All rights reserved.
 Copyright (c) 2001 Agere Systems   All rights reserved.
 Copyright (c) 2002-2020 Lattice Semiconductor Corporation,  All rights reserved.
 
-    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_RAM -lang vhdl -synth lse -bus_exp 7 -bb -arch xo2c00 -type ramdq -device LCMXO2-7000HC -addr_width 13 -data_width 8 -num_words 6144 -cascade -1 -mem_init0 -writemode NORMAL 
+    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_RAM -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type ramdq -device LCMXO2-7000HC -addr_width 12 -data_width 8 -num_words 3072 -cascade -1 -mem_init0 -writemode NORMAL 
     Circuit name     : CPU_RAM
     Module type      : RAM_DQ
     Module Version   : 7.5
     Ports            : 
-	Inputs       : Clock, ClockEn, Reset, WE, Address[12:0], Data[7:0]
+	Inputs       : Clock, ClockEn, Reset, WE, Address[11:0], Data[7:0]
 	Outputs      : Q[7:0]
     I/O buffer       : not inserted
     Memory file      : INIT_ALL_0s
@@ -28,8 +28,8 @@ Copyright (c) 2002-2020 Lattice Semiconductor Corporation,  All rights reserved.
         FD1P3DX : 1
             INV : 1
           MUX21 : 8
-          DP8KC : 6
+          DP8KC : 3
     Estimated Resource Usage:
             LUT : 9
-            EBR : 6
+            EBR : 3
             Reg : 1

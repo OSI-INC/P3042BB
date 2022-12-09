@@ -79,8 +79,8 @@ entity main is
 
 -- Configuration of OSR8.
 	constant prog_addr_len : integer := 11;
-	constant cpu_addr_len : integer := 13;
-	constant ram_addr_len : integer := 13;
+	constant cpu_addr_len : integer := 12;
+	constant ram_addr_len : integer := 12;
 	constant start_pc : integer := 0;
 	constant interrupt_pc : integer := 3;
 end;
@@ -109,7 +109,6 @@ architecture behavior of main is
 	signal CK : std_logic; -- State machine Clock (40 MHz)
 	signal PCK : std_logic; -- Processor Clock (20 MHz)
 	signal SCK : std_logic; -- Serial Clock (2 MHz)
-	signal BCK : std_logic; -- Buffer Clock (4 MHz)
 	
 -- Indicator Signals
 	signal UPLOAD : boolean; -- Uploading To Relay
@@ -165,10 +164,10 @@ architecture behavior of main is
 	attribute syn_keep of DJRRST : signal is true;
 	attribute nomerge of DJRRST : signal is "";  
 		
-	-- CPU Memory Map Constants, sizes and base addresses in units of 512 bytes.
+	-- CPU Memory Map Constants, sizes and base addresses in blocks of 512 bytes.
 	constant cpu_ram_base : integer := 0;
-	constant cpu_ram_range : integer := 12;
-	constant cpu_ctrl_base : integer := 15;
+	constant cpu_ram_range : integer := 6;
+	constant cpu_ctrl_base : integer := 7;
 	constant cpu_ctrl_range : integer := 1;
 	
 	-- CPU Memory Map Constants, low byte of control register space.
@@ -319,10 +318,6 @@ begin
 			else
 				s_count := s_count + 1;
 			end if;
-		end if;
-		
-		if rising_edge(SCK) then
-			BCK <= not BCK;
 		end if;
 	end process;
 	
@@ -645,19 +640,19 @@ begin
 -- Random Access Memory, and Interrupt Handler. Byte ordering is big-endian 
 -- (most significant byte at lower address). 
 	MMU : process (PCK,RESET) is
-		variable top_bits : integer range 0 to 15;
+		variable top_bits : integer range 0 to 7;
 		variable bottom_bits : integer range 0 to 127;
 	begin
 	
 		-- Some variables for brevity.
-		top_bits := to_integer(unsigned(cpu_addr(12 downto 9)));
+		top_bits := to_integer(unsigned(cpu_addr(cpu_addr_len-1 downto 9)));
 		bottom_bits := to_integer(unsigned(cpu_addr(7 downto 0)));
 		
 		-- The RAM data in, its address, and its write strobe are all 
 		-- combinatorial functions of the CPU outputs. They will be ready 
 		-- well before the falling edge of PCK.
 		cpu_ram_in <= cpu_data_out;
-		cpu_ram_addr <= cpu_addr(12 downto 0);
+		cpu_ram_addr <= cpu_addr(ram_addr_len-1 downto 0);
 		CPURWR <= to_std_logic(
 			(top_bits >= cpu_ram_base) 
 			and (top_bits < cpu_ram_base+cpu_ram_range)

@@ -16,7 +16,7 @@ architecture test of tb is
     component CPU_RAM
         port (Clock: in std_logic; ClockEn: in std_logic; 
         Reset: in std_logic; WE: in std_logic; 
-        Address : in std_logic_vector(12 downto 0); 
+        Address : in std_logic_vector(11 downto 0); 
         Data : in std_logic_vector(7 downto 0); 
         Q : out std_logic_vector(7 downto 0)
     );
@@ -26,7 +26,7 @@ architecture test of tb is
     signal ClockEn: std_logic := '0';
     signal Reset: std_logic := '0';
     signal WE: std_logic := '0';
-    signal Address : std_logic_vector(12 downto 0) := (others => '0');
+    signal Address : std_logic_vector(11 downto 0) := (others => '0');
     signal Data : std_logic_vector(7 downto 0) := (others => '0');
     signal Q : std_logic_vector(7 downto 0);
 begin
@@ -61,7 +61,7 @@ begin
     begin
       WE <= '0' ;
       wait until Reset = '0';
-      for i in 0 to 6147 loop
+      for i in 0 to 3075 loop
         wait until Clock'event and Clock = '1';
         WE <= '1' after 1 ns;
       end loop;
@@ -75,7 +75,7 @@ begin
       Address <= (others => '0') ;
       wait for 100 ns;
       wait until Reset = '0';
-      for i in 0 to 12294 loop
+      for i in 0 to 6150 loop
         wait until Clock'event and Clock = '1';
         Address <= Address + '1' after 1 ns;
       end loop;
@@ -88,7 +88,7 @@ begin
       Data <= (others => '0') ;
       wait for 100 ns;
       wait until Reset = '0';
-      for i in 0 to 6147 loop
+      for i in 0 to 3075 loop
         wait until Clock'event and Clock = '1';
         Data <= Data + '1' after 1 ns;
       end loop;

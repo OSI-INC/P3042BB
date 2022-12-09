@@ -1,5 +1,5 @@
 SCUBA, Version Diamond (64-bit) 3.12.1.454
-Fri Dec 09 11:57:08 2022
+Fri Dec 09 13:55:09 2022
   
 Copyright (c) 1991-1994 by NeoCAD Inc. All rights reserved.
 Copyright (c) 1995 AT&T Corp.   All rights reserved.
@@ -9,24 +9,26 @@ Copyright (c) 2002-2020 Lattice Semiconductor Corporation,  All rights reserved.
   
 BEGIN SCUBA Module Synthesis
   
-    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_ROM -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type romblk -device LCMXO2-7000HC -addr_width 11 -data_width 8 -num_words 2048 -cascade -1 -memfile c:/kevan/a3042/p3042bb/cpu_rom.mem -memformat hex 
-    Circuit name     : CPU_ROM
-    Module type      : EBR_ROM
-    Module Version   : 5.4
+    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_RAM -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type ramdq -device LCMXO2-7000HC -addr_width 12 -data_width 8 -num_words 3072 -cascade -1 -mem_init0 -writemode NORMAL 
+    Circuit name     : CPU_RAM
+    Module type      : RAM_DQ
+    Module Version   : 7.5
     Ports            : 
-    Inputs       : Address[10:0], OutClock, OutClockEn, Reset
+    Inputs       : Clock, ClockEn, Reset, WE, Address[11:0], Data[7:0]
     Outputs      : Q[7:0]
     I/O buffer       : not inserted
-    Memory file      : c:/kevan/a3042/p3042bb/cpu_rom.mem
-    EDIF output      : CPU_ROM.edn
-    VHDL output      : CPU_ROM.vhd
-    VHDL template    : CPU_ROM_tmpl.vhd
-    VHDL testbench   : tb_CPU_ROM_tmpl.vhd
+    Memory file      : INIT_ALL_0s
+    EDIF output      : CPU_RAM.edn
+    VHDL output      : CPU_RAM.vhd
+    VHDL template    : CPU_RAM_tmpl.vhd
+    VHDL testbench   : tb_CPU_RAM_tmpl.vhd
     VHDL purpose     : for synthesis and simulation
     Bus notation     : big endian
-    Report output    : CPU_ROM.srp
+    Report output    : CPU_RAM.srp
     Estimated Resource Usage:
-            EBR : 2
+            LUT : 9
+            EBR : 3
+            Reg : 1
   
 END   SCUBA Module Synthesis
 

@@ -2,7 +2,6 @@ Clock  i
 ClockEn  i
 Reset  i
 WE  i
-Address[12]  i
 Address[11]  i
 Address[10]  i
 Address[9]  i

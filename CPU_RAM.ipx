@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<DiamondModule name="CPU_RAM" module="CPU_RAM" VendorName="Lattice Semiconductor Corporation" generator="IPexpress" date="2022 09 13 08:45:44.574" version="7.5" type="Module" synthesis="lse" source_format="VHDL">
+<DiamondModule name="CPU_RAM" module="CPU_RAM" VendorName="Lattice Semiconductor Corporation" generator="IPexpress" date="2022 12 09 13:55:10.661" version="7.5" type="Module" synthesis="synplify" source_format="VHDL">
   <Package>
-		<File name="" type="" modified="2022 09 13 08:45:44.480"/>
-		<File name="CPU_RAM.lpc" type="lpc" modified="2022 09 13 08:45:42.327"/>
-		<File name="CPU_RAM.vhd" type="top_level_vhdl" modified="2022 09 13 08:45:42.374"/>
-		<File name="CPU_RAM_tmpl.vhd" type="template_vhdl" modified="2022 09 13 08:45:42.374"/>
-		<File name="tb_CPU_RAM_tmpl.vhd" type="testbench_vhdl" modified="2022 09 13 08:45:42.374"/>
+		<File name="" type="" modified="2022 12 09 13:55:10.583"/>
+		<File name="CPU_RAM.lpc" type="lpc" modified="2022 12 09 13:55:09.085"/>
+		<File name="CPU_RAM.vhd" type="top_level_vhdl" modified="2022 12 09 13:55:09.117"/>
+		<File name="CPU_RAM_tmpl.vhd" type="template_vhdl" modified="2022 12 09 13:55:09.117"/>
+		<File name="tb_CPU_RAM_tmpl.vhd" type="testbench_vhdl" modified="2022 12 09 13:55:09.117"/>
   </Package>
 </DiamondModule>
