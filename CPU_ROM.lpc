@@ -17,7 +17,7 @@ ModuleName=CPU_ROM
 SourceFormat=VHDL
 ParameterFileVersion=1.0
 Date=12/08/2022
-Time=15:16:53
+Time=22:45:02
 
 [Parameters]
 Verilog=0
@@ -49,4 +49,4 @@ no_init=0
 c:/kevan/a3042/p3042bb/cpu_rom.mem=mem
 
 [Command]
-cmd_line= -w -n CPU_ROM -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type romblk -device LCMXO2-7000HC -addr_width 13 -data_width 8 -num_words 8192 -cascade -1 -memfile "c:/kevan/a3042/p3042bb/cpu_rom.mem" -memformat hex
+cmd_line= -w -n CPU_ROM -lang vhdl -synth lse -bus_exp 7 -bb -arch xo2c00 -type romblk -device LCMXO2-7000HC -addr_width 13 -data_width 8 -num_words 8192 -cascade -1 -memfile "c:/kevan/a3042/p3042bb/cpu_rom.mem" -memformat hex

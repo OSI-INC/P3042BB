@@ -27,6 +27,12 @@
         <Source name="FIFO32.vhd" type="VHDL" type_short="VHDL">
             <Options/>
         </Source>
+        <Source name="FIFO5x128.ipx" type="IPX_Module" type_short="IPX">
+            <Options/>
+        </Source>
+        <Source name="FIFO5x128.vhd" type="VHDL" type_short="VHDL">
+            <Options/>
+        </Source>
         <Source name="Main.vhd" type="VHDL" type_short="VHDL">
             <Options/>
         </Source>

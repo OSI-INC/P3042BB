@@ -17,7 +17,9 @@
 
 -- V2.2, 23-NOV-22: Add support for display panel configuration switch.
 
--- V3.2, 07-DEC-22: Add SDO transmit FIFO. Add SDI receiver FIFO.
+-- V3.2, 07-DEC-22: Add SDO transmit Buffer. Add SDI receiver Buffer.
+
+-- V3.3, 08-DEC-22: Add Detector Module Buffer.
 
 -- Global constants and types.  
 library ieee;  
@@ -171,10 +173,6 @@ architecture behavior of main is
 	constant test_point_addr : integer := 6; -- Test Point Register (Read/Write)
 	constant msg_write_addr : integer := 7; -- Message Write Data (Write)
 	constant dm_reset_addr : integer := 8; -- Detector Module Reset (Write)
-	constant dm_rc_addr : integer := 9; -- Detector Read Complete (Write)
-	constant dm_strobe_addr : integer := 10; -- Data Strobe Upstream (Write)
-	constant dm_data_addr : integer := 11; -- Detector Module Data (Read)
-	constant dm_mrdy_addr : integer := 12; -- Detector Module Message Ready (Read)
 	constant irq_tmr1_addr : integer := 13; -- Timer One value (Read)
 	constant relay_djr_addr : integer := 14; -- Relay Device Job Register (Read)
 	constant relay_crhi_addr : integer := 15; -- Relay Command Register HI (Read)
@@ -188,12 +186,18 @@ architecture behavior of main is
 	constant dpcr_addr : integer := 23; -- Display Panel Configuration Request (Write)
 	constant dpod_addr : integer := 24; -- Display Panel Output Data (Write)
 	constant dpid_addr : integer := 25; -- Display Panel Input Data (Read)
+	constant dmb_read_addr : integer := 26; -- Detector Module Buffer Read (Write)
 	constant irq_tmr2_max_addr : integer := 27; -- Timer Two Period Minus One (Read/Write)
 	constant irq_tmr2_addr : integer := 28; -- Timer Two value (Read)
 	constant fv_addr : integer := 29; -- Firmware Version number (Read)
 	constant indicators_addr : integer := 32; -- Indicator lamp array (Write)
 	constant indicator_low : integer := 1; -- Low index of CPU-controlled indicators
 	constant indicator_hi : integer := 15; -- High index of CPU-controlled indicators
+	constant dmb_id_addr : integer := 48; -- Detector Module ID (Read)
+	constant dmb_hi_addr : integer := 49; -- Detector Module HI Data Byte (Read)
+	constant dmb_lo_addr : integer := 50; -- Detector Module LO Data Byte (Read)
+	constant dmb_pwr_addr : integer := 51; -- Detector Module Power (Read)
+	constant dmb_an_addr : integer := 52; -- Detector Module Antenna Number (Read)
 	
 	-- Relay Interface Registers.
 	signal cont_djr : std_logic_vector(7 downto 0); -- Device Job Register
@@ -227,13 +231,18 @@ architecture behavior of main is
 -- Display Panel Interface
 	signal DPXWR : std_logic; -- Display Panel Transmit Write
 	signal DPXRD : std_logic; -- Display Panel Transmit Read
-	signal DPXEMPTY : std_logic; -- Display Panel Transmit FIFO Empty
-	signal DPXFULL : std_logic; -- Display Panel Transmit FIFO Full
+	signal DPXEMPTY : std_logic; -- Display Panel Transmit Buffer Empty
 	signal DPRWR : std_logic; -- Display Panel Receiver Write
 	signal DPRRD : std_logic; -- Display Panel Receiver Read
-	signal DPREMPTY : std_logic; -- Display Panel Receiver FIFO Empty
-	signal DPRFULL : std_logic; -- Display Panel Receiver FIFO Full
+	signal DPREMPTY : std_logic; -- Display Panel Receiver Buffer Empty
 	signal dp_in, dp_in_waiting, dp_out: std_logic_vector(7 downto 0);
+	
+-- Detector Module Buffer Interface
+	signal DMBWR : std_logic; -- Detector Module Buffer Write
+	signal DMBRD : std_logic; -- Detector Module Buffer Read
+	signal DMBEMPTY : std_logic; -- Detector Module Buffer Empty
+	signal DMBFULL : std_logic; -- Detector Module Buffer Full
+	signal dmb_in, dmb_out : std_logic_vector(39 downto 0);
 		
 -- General-Purpose Constant
 	constant max_data_byte : std_logic_vector(7 downto 0) := "11111111";
@@ -400,7 +409,7 @@ begin
 	end process;
 	
 	-- The Message Buffer is a FIFO made out of the external SRAM, two pointers,
-	-- and the Message Buffer Controller. Writes to the FIFO occur when the 
+	-- and the Message Buffer Controller. Writes to the buffer occur when the 
 	-- Message Write Strobe (MWRS) is asserted, and are complete when Message
 	-- Write Acknowledge (MWRACK) is asserted. The data written is the byte 
 	-- held in the global mwr_data register. The MWRACK flag remains asserted
@@ -569,10 +578,10 @@ begin
 			CK => PCK
 		);
 		
--- The Serial Data Out First-In First-Out (SDO FIFO) buffer. The CPU writes
--- to the FIFO and the Display Panel Transmitter takes the bytes out one by
--- one and transmits them.
-	SDO_FIFO : entity FIFO32
+-- The Serial Data Out Buffer (SDO Buffer) buffer is where the CPU writes 
+-- bytes it wants the Display Panel Transmitter to serialize for the
+-- Display panel.
+	SDO_Buffer : entity FIFO32
 		port map (
 			Data => cpu_data_out,
 			WrClock => not PCK,
@@ -582,14 +591,14 @@ begin
 			Reset => RESET,
 			RPReset => RESET,
 			Q => dp_out,
-			Empty => DPXEMPTY,
-			Full => DPXFULL
+			Empty => DPXEMPTY
 		);
 
--- The Serial Data In First-In First-Out (SDI FIFO) buffer. The Display
--- Panel Receiver writes bytes into the FIFO and the CPU checks the
--- DPRDY flag to see if a byte is waiting, then reads it out.
-	SDI_FIFO : entity FIFO32
+-- The Serial Data In Buffer (SDI Buffer) is wher the Display
+-- Panel Receiver writes bytes for the CPU to read out. The
+-- CPU checks the DPREMPTY flag to see if a byte is waiting, 
+-- then reads it out.
+	SDI_Buffer : entity FIFO32
 		port map (
 			Data => dp_in,
 			WrClock => not SCK,
@@ -599,9 +608,26 @@ begin
 			Reset => RESET,
 			RPReset => RESET,
 			Q => dp_in_waiting,
-			Empty => DPREMPTY,
-			Full => DPRFULL
+			Empty => DPREMPTY
 		);
+
+-- The Detector Module Buffer is where the Detector Module Reader puts
+-- messages for the CPU to read out and subsequently write into the
+-- Message Buffer. It is five bytes wide. When it's Empty flag is 
+-- not set, a message is ready to read.
+	DM_Buffer : entity FIFO5x128
+		port map (
+        Data => dmb_in,
+        WrClock => not SCK,
+        RdClock => not PCK,
+        WrEn => DMBWR,
+        RdEn => DMBRD,
+        Reset=> RESET,
+        RPReset => RESET,
+        Q => dmb_out,
+        Empty => DMBEMPTY,
+		Full => DMBFULL
+	);
 
 -- The Memory Manager maps eight-bit read and write access to Detector Module 
 -- daisy chain bus, and the registers of the relay interface, as well as the
@@ -633,36 +659,39 @@ begin
 			cpu_data_in <= cpu_ram_out;
 		when cpu_ctrl_base to (cpu_ctrl_base+cpu_ctrl_range-1) =>
 			case bottom_bits is
-			when irq_bits_addr => cpu_data_in <= irq_bits;
-			when irq_mask_addr => cpu_data_in <= irq_mask;
-			when irq_tmr1_max_addr => cpu_data_in <= irq_tmr1_max;
-			when irq_tmr1_addr => cpu_data_in <= irq_tmr1;
-			when irq_tmr2_max_addr => cpu_data_in <= irq_tmr2_max;
-			when irq_tmr2_addr => cpu_data_in <= irq_tmr2;
-			when fv_addr => cpu_data_in <= std_logic_vector(
-				to_unsigned(firmware_version,8));
-			when test_point_addr => cpu_data_in <= tp_reg;
-			when dm_data_addr => cpu_data_in <= dub;
-			when dm_mrdy_addr => 
-				cpu_data_in <= (others => '0');
-				cpu_data_in(0) <= MRDY;
-			when relay_djr_addr => cpu_data_in <= cont_djr;
-			when relay_crhi_addr => cpu_data_in <= cont_cr(15 downto 8);
-			when relay_crlo_addr => cpu_data_in <= cont_cr(7 downto 0);
-			when relay_rc3_addr => cpu_data_in <= cont_rc(31 downto 24);
-			when relay_rc2_addr => cpu_data_in <= cont_rc(23 downto 16);
-			when relay_rc1_addr => cpu_data_in <= cont_rc(15 downto 8);
-			when relay_rc0_addr => cpu_data_in <= cont_rc(7 downto 0);
-			when comm_status_addr => 
-				cpu_data_in <= (others => '0');
-				cpu_data_in(0) <= to_std_logic(UPLOAD);
-				cpu_data_in(1) <= to_std_logic(EMPTY);
-				cpu_data_in(2) <= ETH;
-				cpu_data_in(3) <= to_std_logic(CONFIG);
-				cpu_data_in(4) <= not DPREMPTY;
-			when dpid_addr => 
-				cpu_data_in <= dp_in_waiting;
-			when others => cpu_data_in <= max_data_byte;
+				when irq_bits_addr => cpu_data_in <= irq_bits;
+				when irq_mask_addr => cpu_data_in <= irq_mask;
+				when irq_tmr1_max_addr => cpu_data_in <= irq_tmr1_max;
+				when irq_tmr1_addr => cpu_data_in <= irq_tmr1;
+				when irq_tmr2_max_addr => cpu_data_in <= irq_tmr2_max;
+				when irq_tmr2_addr => cpu_data_in <= irq_tmr2;
+				when fv_addr => cpu_data_in <= std_logic_vector(
+					to_unsigned(firmware_version,8));
+				when test_point_addr => cpu_data_in <= tp_reg;
+				when relay_djr_addr => cpu_data_in <= cont_djr;
+				when relay_crhi_addr => cpu_data_in <= cont_cr(15 downto 8);
+				when relay_crlo_addr => cpu_data_in <= cont_cr(7 downto 0);
+				when relay_rc3_addr => cpu_data_in <= cont_rc(31 downto 24);
+				when relay_rc2_addr => cpu_data_in <= cont_rc(23 downto 16);
+				when relay_rc1_addr => cpu_data_in <= cont_rc(15 downto 8);
+				when relay_rc0_addr => cpu_data_in <= cont_rc(7 downto 0);
+				when comm_status_addr => 
+					cpu_data_in(0) <= to_std_logic(UPLOAD);
+					cpu_data_in(1) <= to_std_logic(EMPTY);
+					cpu_data_in(2) <= ETH;
+					cpu_data_in(3) <= to_std_logic(CONFIG);
+					cpu_data_in(4) <= not DPREMPTY;
+					cpu_data_in(5) <= not DMBEMPTY;
+					cpu_data_in(6) <= DMBFULL;
+					cpu_data_in(7) <= MRDY;
+				when dpid_addr => 
+					cpu_data_in <= dp_in_waiting;
+				when dmb_id_addr => cpu_data_in <= dmb_in(39 downto 32);
+				when dmb_hi_addr => cpu_data_in <= dmb_in(31 downto 24);
+				when dmb_lo_addr => cpu_data_in <= dmb_in(23 downto 16);
+				when dmb_pwr_addr => cpu_data_in <= dmb_in(15 downto 8);
+				when dmb_an_addr => cpu_data_in <= dmb_in(7 downto 0);
+				when others => cpu_data_in <= max_data_byte;
 			end case;
 		when others =>
 			cpu_data_in <= max_data_byte;
@@ -692,6 +721,8 @@ begin
 			RST_BY_CPU <= false;
 			DMRST_BY_CPU <= true;
 			DPXWR <= '0';
+			DPRRD <= '0';
+			DMBRD <= '0';
 			DPCONFIG <= false;
 			for i in 1 to 15 loop indicator_control(i) <= '0'; end loop;
 		elsif falling_edge(PCK) then
@@ -700,6 +731,7 @@ begin
 			DJRRST <= false;
 			DPXWR <= '0';
 			DPRRD <= '0';
+			DMBRD <= '0';
 			if MWRACK then MWRS <= false; end if;
 			if CPUDS then 
 				if (top_bits >= cpu_ctrl_base) 
@@ -718,13 +750,12 @@ begin
 								mwr_data <= cpu_data_out;
 								MWRS <= true;
 							when dm_reset_addr => DMRST_BY_CPU <= (cpu_data_out(0) = '1');
-							when dm_rc_addr => DMRC <= cpu_data_out(0);
-							when dm_strobe_addr => DSU <= cpu_data_out(0);
 							when relay_djr_rst_addr => DJRRST <= true;
 							when indicators_addr + 1 to indicators_addr + 15 =>
 								indicator_control(to_integer(unsigned(cpu_addr(3 downto 0)))) 
 									<= cpu_data_out(0);
 							when dpod_addr => DPXWR <= '1';
+							when dmb_read_addr => DMBRD <= '1';
 						end case;
 					end if;
 					if not CPUWR then
@@ -924,6 +955,68 @@ begin
 			
 		end if;
 	end process;
+	
+	-- The Detector Module Interface watches for MRDY, which indicates
+	-- that one or more detector modules has a message ready for
+	-- readout. It reads the five bytes of the front message, as 
+	-- presented by daisy chain, and stores them in the Detector
+	-- Module Buffer, first byte in the top eight bits, last byte 
+	-- in the bottom eight bits, of the forty-bit buffer word, then
+	-- asserts DMBWR to write the word into the buffer. The interface
+	-- runs off SCK, which has period 500 ns. It asserts Detector 
+	-- Module Read Control (DMRC) to start the read, as required by the 
+	-- daisy chain protocol. It asserts Data Strobe Upstream (DSU) to
+	-- get the first byte. Subsequent DS cycles get the remaining bytes.
+	-- Total read time is 500 ns * 13 = 6.5 us.
+	Detector_Module_Interface : process (SCK,RESET) is
+	variable state, next_state : integer range 0 to 15;
+	begin
+		if (RESET = '1') then
+			DMBWR <= '0';
+			dmb_in <= (others => '0');
+			state := 0;
+			DMRC <= '0';
+			DSU <= '0';
+		elsif rising_edge(SCK) then
+			next_state := state + 1;
+			dmb_in <= dmb_in;
+			DMBWR <= '0';
+			case state is
+				when 0 => 
+					if (MRDY = '0') then next_state := 0; end if;
+					DMRC <= '0'; DSU <= '0';
+				when 1 => 
+					DMRC <= '1'; DSU <= '0';
+				when 2 => 
+					DMRC <= '1'; DSU <= '1';
+				when 3 => 
+					DMRC <= '1'; DSU <= '0'; dmb_in(39 downto 32) <= dub;
+				when 4 => 
+					DMRC <= '1'; DSU <= '1';
+				when 5 => 
+					DMRC <= '1'; DSU <= '0'; dmb_in(31 downto 24) <= dub;
+				when 6 => 
+					DMRC <= '1'; DSU <= '1'; 
+				when 7 => 
+					DMRC <= '1'; DSU <= '0'; dmb_in(23 downto 16) <= dub;
+				when 8 => 
+					DMRC <= '1'; DSU <= '1';
+				when 9 => 
+					DMRC <= '1'; DSU <= '0'; dmb_in(15 downto 8) <= dub;
+				when 10 => 
+					DMRC <= '1'; DSU <= '1';
+				when 11 => 
+					DMRC <= '1'; DSU <= '0'; dmb_in(7 downto 0) <= dub;
+				when 12 => 
+					DMRC <= '0'; DSU <= '0';
+					next_state := 0;
+					DMBWR <= '1';
+				when others =>
+					DMRC <= '0'; DSU <= '0';
+			end case;
+			state := next_state;
+		end if;
+	end process;
 		
 	-- The Lamp Inhibitor looks at the HIDE switch and turns on or off
 	-- the front edge flashing lamps and the detector module lamps. It
@@ -957,7 +1050,7 @@ begin
 	end process;
 	
 	-- The Display Panel Transmitter sends messages to the display panel
-	-- using SDO. When the SDO FIFO contains a byte, the transmitter 
+	-- using SDO. When the SDO Buffer contains a byte, the transmitter 
 	-- reads the byte and transmits it at 1 Mbps. The SDO signal is usually
 	-- LO, so we begin with 2 us of guaranteed LO for set-up, then a 1-us 
 	-- HI for a start bit, and the eight data bits, 1 us each. 
@@ -1069,7 +1162,7 @@ begin
 	end process;
 	
 	-- The UPLOAD flag is set when the Relay is reading from the message buffer.
-	-- The EMPTY flag is set when the FIFO is nearly empty.
+	-- The EMPTY flag is set when the Message Buffer is nearly empty.
 	Fifo_Indicators : process (CK,RESET) is
 	constant end_count : integer := 255;
 	variable upload_state, empty_state : integer range 0 to end_count;
@@ -1119,7 +1212,7 @@ begin
 	-- Test points. We have TP1..TP3 showing the microprocessor-controlled registers 
 	-- zero through two. We have TP4 showing us any changes in the upstream data bus.
 	TP1 <= tp_reg(0);
-	TP2 <= tp_reg(1);
-	TP3 <= tp_reg(2);
+	TP2 <= DMBWR;
+	TP3 <= DMBRD;
 	TP4 <= dub(0) xor dub(1) xor dub(2) xor dub(3) xor dub(4) xor dub(5) xor dub(6) xor dub(7);
 end behavior;

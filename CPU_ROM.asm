@@ -19,10 +19,6 @@ const cpu_rst_addr 0x1E05 ; Program Reset (Write)
 const test_point_addr 0x1E06 ; Test Point Register (Read/Write)
 const msg_write_addr 0x1E07 ; Message Write Data (Write)
 const dm_reset_addr 0x1E08 ; Detector Module Reset (Write)
-const dm_rc_addr 0x1E09 ; Detector Module Read Complete (Write)
-const dm_strobe_addr 0x1E0A ; Data Strobe Upstream (Write)
-const dm_data_addr 0x1E0B ; Detector Module Data (Read)
-const dm_mrdy_addr 0x1E0C ; Message Ready Flag (Read)
 const irq_tmr1_addr 0x1E0D ; The interrupt timer value (Read)
 const relay_djr_addr 0x1E0E ; Relay Device Job Register (Read)
 const relay_crhi_addr 0x1E0F ; Relay Command Register HI (Read)
@@ -36,11 +32,16 @@ const comm_status_addr 0x1E16 ; Communication Status Register (Read)
 const dpcr_addr 0x1E17 ; Display Panel Configuration Request (Write)
 const dpod_addr 0x1E18 ; Display Panel Output Data (Write)
 const dpid_addr 0x1E19 ; Display Panel Input Data (Read)
-const fifo_empty_addr 0x1E1A ; Fifo Nearly Empty (Read)
+const dmb_read_addr 0x1E1A ; Detector Module Buffer Read (Write)
 const irq_tmr2_max_addr 0x1E1B ; Interrupt Timer Two Period Minus One (Read/Write)
 const irq_tmr2_addr 0x1E1C ; Interrupt Counter Value (Read)
 const fv_addr 0x1E1D ; Firmware Version number (Read)
 const zero_indicator_addr 0x1E20 ; Zero channel indicator (Write)
+const dmb_id_addr 0x1E30 ; Detector Module ID (Read)
+const dmb_hi_addr 0x1E31 ; Detector Module HI Data Byte (Read)
+const dmb_lo_addr 0x1E32 ; Detector Module LO Data Byte (Read)
+const dmb_pwr_addr 0x1E33 ; Detector Module Power (Read)
+const dmb_an_addr 0x1E34 ; Detector Module Antenna Number (Read)
 
 ; Controller job numbers.
 const read_job 3
@@ -62,8 +63,9 @@ const int_unused_mask 0xF0
 const valid_id_mask 0x0F
 const config_bit_mask 0x01
 const dpirdy_bit_mask 0x10
-const show_bit_mask 0x020
-const hide_bit_mask 0x40
+const dmbrdy_bit_mask 0x20
+const dmbfull_bit_mask 0x40
+const mrdy_mask 0x80
 
 ; Display panel opcodes
 const dp_opcode_msg 0x10
@@ -410,8 +412,8 @@ jp main_message_handler
 main_message_handler:
 
 ; Check the message ready (MRDY) flag. If it's not set, jump to main_no_mrdy.
-ld A,(dm_mrdy_addr)
-and A,0x01
+ld A,(comm_status_addr)
+and A,dmbrdy_bit_mask
 jp z,main_no_mrdy
 
 ; Read the new message.
@@ -821,7 +823,7 @@ rti
 ; protected onto the stack before calling, and pops upon return.
 
 ; --------------------------------------------------------------
-; Read a message from the detector module daisy chain and store
+; Read a message from the detector module buffer and store
 ; in the 'msg' variables.
 ; --------------------------------------------------------------
 rd_msg:
@@ -833,63 +835,23 @@ push A
 push H
 push IX
 
-; Assert Detector Module Read Control (DMRC) to start the read cycle. 
-; We wait a while to allow the daisy chain data strobe lines to settle.
-ld A,0x01               
-ld (dm_rc_addr),A
-ld A,daisy_chain_delay
-dly A
+; Assert Detector Module Buffer Read (DMBRD) to read the message out of
+; the Detector Module Buffer. We are assuming such a message exists: the
+; calling process must check the DMBRDY bit in the communication status
+; register. Any write to the DMB read location will do.
+ld (dmb_read_addr),A
 
-; Read the channel ID.
-ld A,0x01               
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-ld A,(dm_data_addr)
+; Read the five bytes of the message.
+ld A,(dmb_id_addr)
 ld (msg_id),A
-ld A,0x00
-ld (dm_strobe_addr),A
-
-; Read the HI data byte.
-rd_msg_continue:
-ld A,0x01               
-ld (dm_strobe_addr),A
-ld A,(dm_data_addr)
+ld A,(dmb_hi_addr)
 ld (msg_hi),A
-ld A,0x00
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-
-; Read the LO data byte.
-ld A,0x01               
-ld (dm_strobe_addr),A
-ld A,(dm_data_addr)
+ld A,(dmb_lo_addr)
 ld (msg_lo),A
-ld A,0x00
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-
-; Read the detector power.
-ld A,0x01               
-ld (dm_strobe_addr),A
-ld A,(dm_data_addr)
+ld A,(dmb_pwr_addr)
 ld (msg_pwr),A
-ld A,0x00
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
-
-; Read the antenna number.
-ld A,0x01               
-ld (dm_strobe_addr),A
-ld A,(dm_data_addr)
+ld A,(dmb_an_addr)
 ld (msg_an),A
-ld A,0x00
-ld (dm_strobe_addr),A
-ld A,daisy_chain_delay
-dly A
 
 ; Check to see if the message ID is valid for a detector module. Message
 ; IDs with the lower four bits zero are reserved for internal use of this
@@ -899,7 +861,7 @@ and A,valid_id_mask
 jp nz,rd_msg_csel
 ld A,invalid_id
 ld (msg_id),A
-jp rd_msg_terminate
+jp rd_msg_done
 
 ; Check that this channel is among those enabled by the channel select
 ; array. If not, set the message identifier to the invalid identifier
@@ -912,14 +874,9 @@ push A
 pop IX
 ld A,(IX)
 sub A,0x00
-jp rd_msg_terminate
+jp rd_msg_done
 ld A,invalid_id
 ld (msg_id),A
-
-; Unassert Detector Module Read Control
-rd_msg_terminate:
-ld A,0x00               
-ld (dm_rc_addr),A
 
 ; Pop the registers and flags off the stack.
 rd_msg_done:

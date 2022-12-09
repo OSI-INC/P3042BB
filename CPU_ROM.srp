@@ -1,5 +1,5 @@
 SCUBA, Version Diamond (64-bit) 3.12.1.454
-Thu Dec 08 15:16:53 2022
+Thu Dec 08 22:45:02 2022
 
 Copyright (c) 1991-1994 by NeoCAD Inc. All rights reserved.
 Copyright (c) 1995 AT&T Corp.   All rights reserved.
@@ -7,7 +7,7 @@ Copyright (c) 1995-2001 Lucent Technologies Inc.  All rights reserved.
 Copyright (c) 2001 Agere Systems   All rights reserved.
 Copyright (c) 2002-2020 Lattice Semiconductor Corporation,  All rights reserved.
 
-    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_ROM -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type romblk -device LCMXO2-7000HC -addr_width 13 -data_width 8 -num_words 8192 -cascade -1 -memfile c:/kevan/a3042/p3042bb/cpu_rom.mem -memformat hex 
+    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_ROM -lang vhdl -synth lse -bus_exp 7 -bb -arch xo2c00 -type romblk -device LCMXO2-7000HC -addr_width 13 -data_width 8 -num_words 8192 -cascade -1 -memfile c:/kevan/a3042/p3042bb/cpu_rom.mem -memformat hex 
     Circuit name     : CPU_ROM
     Module type      : EBR_ROM
     Module Version   : 5.4

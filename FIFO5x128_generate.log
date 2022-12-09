@@ -3,7 +3,7 @@ Starting process: module
 Starting process: 
 
 SCUBA, Version Diamond (64-bit) 3.12.1.454
-Thu Dec 08 15:24:44 2022
+Thu Dec 08 19:47:47 2022
 
 Copyright (c) 1991-1994 by NeoCAD Inc. All rights reserved.
 Copyright (c) 1995 AT&T Corp.   All rights reserved.
@@ -13,27 +13,27 @@ Copyright (c) 2002-2020 Lattice Semiconductor Corporation,  All rights reserved.
 
 BEGIN SCUBA Module Synthesis
 
-    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n FIFO1024 -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type ebfifo -depth 1024 -width 8 -rwidth 8 -no_enable -pe 4 -pf 508 
-    Circuit name     : FIFO1024
+    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n FIFO5x128 -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type ebfifo -depth 128 -width 40 -rwidth 40 -no_enable -pe 10 -pf 120 
+    Circuit name     : FIFO5x128
     Module type      : ebfifo
     Module Version   : 5.8
     Ports            : 
-	Inputs       : Data[7:0], WrClock, RdClock, WrEn, RdEn, Reset, RPReset
-	Outputs      : Q[7:0], Empty, Full, AlmostEmpty, AlmostFull
+	Inputs       : Data[39:0], WrClock, RdClock, WrEn, RdEn, Reset, RPReset
+	Outputs      : Q[39:0], Empty, Full, AlmostEmpty, AlmostFull
     I/O buffer       : not inserted
-    EDIF output      : FIFO1024.edn
-    VHDL output      : FIFO1024.vhd
-    VHDL template    : FIFO1024_tmpl.vhd
-    VHDL testbench   : tb_FIFO1024_tmpl.vhd
+    EDIF output      : FIFO5x128.edn
+    VHDL output      : FIFO5x128.vhd
+    VHDL template    : FIFO5x128_tmpl.vhd
+    VHDL testbench   : tb_FIFO5x128_tmpl.vhd
     VHDL purpose     : for synthesis and simulation
     Bus notation     : big endian
-    Report output    : FIFO1024.srp
+    Report output    : FIFO5x128.srp
     Estimated Resource Usage:
-            EBR : 1
+            EBR : 3
 
 END   SCUBA Module Synthesis
 
-File: FIFO1024.lpc created.
+File: FIFO5x128.lpc created.
 
 
 End process: completed successfully.

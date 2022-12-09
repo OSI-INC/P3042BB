@@ -13,11 +13,11 @@ CoreType=LPM
 CoreStatus=Demo
 CoreName=FIFO_DC
 CoreRevision=5.8
-ModuleName=FIFO1024
+ModuleName=FIFO5x128
 SourceFormat=VHDL
 ParameterFileVersion=1.0
 Date=12/08/2022
-Time=15:24:44
+Time=19:47:47
 
 [Parameters]
 Verilog=0
@@ -28,20 +28,20 @@ Expression=BusA(0 to 7)
 Order=Big Endian [MSB:LSB]
 IO=0
 FIFOImp=EBR Only
-RDepth=1024
-RWidth=8
-WDepth=1024
-WWidth=8
+RDepth=128
+RWidth=40
+WDepth=128
+WWidth=40
 regout=0
 CtrlByRdEn=0
 ClockEn=0
 EmpFlg=1
 PeMode=Static - Single Threshold
-PeAssert=4
+PeAssert=10
 PeDeassert=12
 FullFlg=1
 PfMode=Static - Single Threshold
-PfAssert=508
+PfAssert=120
 PfDeassert=506
 Reset=Async
 Reset1=Sync
@@ -50,4 +50,4 @@ WDataCount=0
 EnECC=0
 
 [Command]
-cmd_line= -w -n FIFO1024 -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type ebfifo -depth 1024 -width 8 -rwidth 8 -no_enable -pe 4 -pf 508
+cmd_line= -w -n FIFO5x128 -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type ebfifo -depth 128 -width 40 -rwidth 40 -no_enable -pe 10 -pf 120

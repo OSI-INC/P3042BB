@@ -1,5 +1,5 @@
 SCUBA, Version Diamond (64-bit) 3.12.1.454
-Thu Dec 08 15:24:44 2022
+Thu Dec 08 22:45:02 2022
   
 Copyright (c) 1991-1994 by NeoCAD Inc. All rights reserved.
 Copyright (c) 1995 AT&T Corp.   All rights reserved.
@@ -9,23 +9,24 @@ Copyright (c) 2002-2020 Lattice Semiconductor Corporation,  All rights reserved.
   
 BEGIN SCUBA Module Synthesis
   
-    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n FIFO1024 -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type ebfifo -depth 1024 -width 8 -rwidth 8 -no_enable -pe 4 -pf 508 
-    Circuit name     : FIFO1024
-    Module type      : ebfifo
-    Module Version   : 5.8
+    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_ROM -lang vhdl -synth lse -bus_exp 7 -bb -arch xo2c00 -type romblk -device LCMXO2-7000HC -addr_width 13 -data_width 8 -num_words 8192 -cascade -1 -memfile c:/kevan/a3042/p3042bb/cpu_rom.mem -memformat hex 
+    Circuit name     : CPU_ROM
+    Module type      : EBR_ROM
+    Module Version   : 5.4
     Ports            : 
-    Inputs       : Data[7:0], WrClock, RdClock, WrEn, RdEn, Reset, RPReset
-    Outputs      : Q[7:0], Empty, Full, AlmostEmpty, AlmostFull
+    Inputs       : Address[12:0], OutClock, OutClockEn, Reset
+    Outputs      : Q[7:0]
     I/O buffer       : not inserted
-    EDIF output      : FIFO1024.edn
-    VHDL output      : FIFO1024.vhd
-    VHDL template    : FIFO1024_tmpl.vhd
-    VHDL testbench   : tb_FIFO1024_tmpl.vhd
+    Memory file      : c:/kevan/a3042/p3042bb/cpu_rom.mem
+    EDIF output      : CPU_ROM.edn
+    VHDL output      : CPU_ROM.vhd
+    VHDL template    : CPU_ROM_tmpl.vhd
+    VHDL testbench   : tb_CPU_ROM_tmpl.vhd
     VHDL purpose     : for synthesis and simulation
     Bus notation     : big endian
-    Report output    : FIFO1024.srp
+    Report output    : CPU_ROM.srp
     Estimated Resource Usage:
-            EBR : 1
+            EBR : 8
   
 END   SCUBA Module Synthesis
 
