@@ -21,16 +21,16 @@
         <Source name="CPU_RAM.vhd" type="VHDL" type_short="VHDL">
             <Options/>
         </Source>
-        <Source name="FIFO32.ipx" type="IPX_Module" type_short="IPX">
+        <Source name="FIFO8.ipx" type="IPX_Module" type_short="IPX">
             <Options/>
         </Source>
-        <Source name="FIFO32.vhd" type="VHDL" type_short="VHDL">
+        <Source name="FIFO8.vhd" type="VHDL" type_short="VHDL">
             <Options/>
         </Source>
-        <Source name="FIFO5x128.ipx" type="IPX_Module" type_short="IPX">
+        <Source name="FIFO40.ipx" type="IPX_Module" type_short="IPX">
             <Options/>
         </Source>
-        <Source name="FIFO5x128.vhd" type="VHDL" type_short="VHDL">
+        <Source name="FIFO40.vhd" type="VHDL" type_short="VHDL">
             <Options/>
         </Source>
         <Source name="Main.vhd" type="VHDL" type_short="VHDL">

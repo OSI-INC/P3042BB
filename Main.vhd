@@ -19,15 +19,14 @@
 
 -- V3.2, 07-DEC-22: Add SDO transmit Buffer. Add SDI receiver Buffer.
 
--- V3.3, 08-DEC-22: Add Detector Module Buffer. Reduce program memory to 
+-- V3.3, 09-DEC-22: Add Detector Module Buffer. Reduce program memory to 
 -- 2 KByte so code will ultimately fit into a 4000ZE chip. Detector
 -- Module Interface reads out the daisy chain and rejects invalide
 -- message before storing in the buffer. Message reading greatly 
 -- simplified in the CPU. Correct bug in implementation of channel
--- selection in CPU code. Our main loop, when eliminating duplicates
--- takes 120 PCK cycles. Running with PCK = 20 MHz in the 7000HC chip,
--- maximum message rate is around 160 kMPS. Running with PCK = 10 MHz
--- in the 4000ZE chip, message rate drops to 80 kMPS.
+-- selection in CPU code. Main loop when eliminating duplicates
+-- takes 38-87 PCK cycles. Running with PCK at 20 MHz in the 7000HC 
+-- chip, that's 3 us, or in the 4000ZE chip, 6 us.
 
 -- Global constants and types.  
 library ieee;  
@@ -105,11 +104,12 @@ architecture behavior of main is
 	signal DMRC_DEL : std_logic;
 	
 -- Clock and Timing Signals.
-	signal LOCK : std_logic; -- PLL Lock
+	signal LOCK : std_logic; -- Phase Locked Loop Has Locked
 	signal FCK : std_logic; -- Fast Clock (80 MHz)
-	signal CK : std_logic; -- State machine clock (40 MHz)
-	signal PCK : std_logic; -- Processor clock (20 MHz)
-	signal SCK : std_logic; -- Serial clock (2 MHz)
+	signal CK : std_logic; -- State machine Clock (40 MHz)
+	signal PCK : std_logic; -- Processor Clock (20 MHz)
+	signal SCK : std_logic; -- Serial Clock (2 MHz)
+	signal BCK : std_logic; -- Buffer Clock (4 MHz)
 	
 -- Indicator Signals
 	signal UPLOAD : boolean; -- Uploading To Relay
@@ -249,7 +249,7 @@ architecture behavior of main is
 	signal DMBWR : std_logic; -- Detector Module Buffer Write
 	signal DMBRD : std_logic; -- Detector Module Buffer Read
 	signal DMBEMPTY : std_logic; -- Detector Module Buffer Empty
-	signal DMBFULL : std_logic; -- Detector Module Buffer Full
+	signal DMBBUSY : std_logic; -- Detector Module Buffer Busy
 	signal dmb_in, dmb_out : std_logic_vector(39 downto 0);
 		
 -- General-Purpose Constant
@@ -319,6 +319,10 @@ begin
 			else
 				s_count := s_count + 1;
 			end if;
+		end if;
+		
+		if rising_edge(SCK) then
+			BCK <= not BCK;
 		end if;
 	end process;
 	
@@ -633,8 +637,7 @@ begin
         Reset=> RESET,
         RPReset => RESET,
         Q => dmb_out,
-        Empty => DMBEMPTY,
-		Full => DMBFULL
+        Empty => DMBEMPTY
 	);
 
 -- The Memory Manager maps eight-bit read and write access to Detector Module 
@@ -690,7 +693,7 @@ begin
 					cpu_data_in(3) <= to_std_logic(CONFIG);
 					cpu_data_in(4) <= not DPREMPTY;
 					cpu_data_in(5) <= not DMBEMPTY;
-					cpu_data_in(6) <= DMBFULL;
+					cpu_data_in(6) <= DMBBUSY;
 					cpu_data_in(7) <= MRDY;
 				when dpid_addr => 
 					cpu_data_in <= dp_in_waiting;
@@ -767,6 +770,10 @@ begin
 						end case;
 					end if;
 					if not CPUWR then
+						-- This implementation of DPRRD results in the new byte being
+						-- available next time we read the buffer, which is okay if the
+						-- display panel keeps sending bytes, but not okay if it sends
+						-- only one. 
 						if (bottom_bits = dpid_addr) then 
 							DPRRD <= '1'; 
 						end if;
@@ -979,7 +986,8 @@ begin
 	-- time is 500 ns * 13 = 6.5 us. In principle, the interface is active
 	-- only when a message is ready. But if one of the detector modules
 	-- fails, breaking the daisy-chain, those upstream will assert MRDY
-	-- continuously. 
+	-- continuously. The interface sets a flag DMBBUSY when it is not in
+	-- its rest state, and the CPU can check this flag.
 	Detector_Module_Interface : process (SCK,RESET) is
 	variable state, next_state : integer range 0 to 15;
 	begin
@@ -989,13 +997,16 @@ begin
 			state := 0;
 			DMRC <= '0';
 			DSU <= '0';
+			DMBBUSY <= '0';
 		elsif rising_edge(SCK) then
 			next_state := state + 1;
 			dmb_in <= dmb_in;
 			DMBWR <= '0';
+			DMBBUSY <= '1';
 			case state is
 				when 0 => 
 					if (MRDY = '0') then next_state := 0; end if;
+					DMBBUSY <= '0';
 					DMRC <= '0'; DSU <= '0';
 				when 1 => 
 					DMRC <= '1'; DSU <= '0';

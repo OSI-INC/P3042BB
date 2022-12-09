@@ -64,8 +64,8 @@ const valid_id_mask 0x0F
 const config_bit_mask 0x01
 const dpirdy_bit_mask 0x10
 const dmbrdy_bit_mask 0x20
-const dmbfull_bit_mask 0x40
-const mrdy_mask 0x80
+const dmbbusy_bit_mask 0x40
+const mrdy_bit_mask 0x80
 
 ; Display panel opcodes
 const dp_opcode_msg 0x10
@@ -101,7 +101,7 @@ const rck_per_ts 255 ; RCK periods per timestamp interrupt minus one
 const rck_per_lamps 15 ; RCK periods per lamp interrupt minus one
 const activity_linger 4 ; Timer periods of light per message received
 const flash_linger 200 ; Timer periods for reset flash
-const daisy_chain_delay 5 ; PCK periods for daisy-chain round trip
+const slow_task_skip 100 ; Main event loops between slow tasks
 const dmrst_length 10 ; PCK periods for reset pulse
 
 ; Message Identifiers
@@ -109,23 +109,17 @@ const clock_id 0x00 ; Clock message identifier.
 const invalid_id 0xF0 ; Invalid message identifier
 
 ; Variable, Constant, Array, and Stack Locations.
-const msg_id      0x0000 ; Message Identifier
-const msg_hi      0x0001 ; Message Data, HI
-const msg_lo      0x0002 ; Message Data, LO
-const msg_pwr     0x0003 ; Message Power
-const msg_an      0x0004 ; Message Antenna Number
-const msg_id_prv  0x0005 ; Previous Message Identifier
-const msg_hi_prv  0x0006 ; Previous Message Data, HI
-const msg_lo_prv  0x0007 ; Previous Message Data, LO
-const msg_pwr_prv 0x0008 ; Previous Message Power
-const msg_an_prv  0x0009 ; Previous Message Antenna Number
-const clock_hi    0x0020 ; Clock HI
-const clock_lo    0x0021 ; Clock LO
-const main_cntr   0x0022 ; Main Loop Counter
-const zero_channel_select 0x0200 ; Base of channel select array
-const zero_channel_timer 0x0300 ; Base of channel timer array
-const zero_index_antenna 0x0400 ; Base of antenna mapping table
-const sp_initial 0x1700 ; Bottom of the stack in RAM.
+const msg_id_prv  0x0001 ; Previous Message Identifier
+const msg_hi_prv  0x0002 ; Previous Message Data, HI
+const msg_lo_prv  0x0003 ; Previous Message Data, LO
+const msg_pwr_prv 0x0004 ; Previous Message Power
+const msg_an_prv  0x0005 ; Previous Message Antenna Number
+const clock_hi    0x0006 ; Clock HI
+const clock_lo    0x0007 ; Clock LO
+const zero_channel_select 0x0100 ; Base of channel select array
+const zero_channel_timer 0x0200 ; Base of channel timer array
+const zero_index_antenna 0x0300 ; Base of antenna mapping table
+const sp_initial 0x0700 ; Bottom of the stack in RAM.
 
 ; ------------------------------------------------------------
 ;                         START
@@ -328,6 +322,11 @@ ld (test_point_addr),A
 ; Enable interrupts to start the data acquisition.
 clri
 
+; Clear the main loop counter, which we keep in register E.
+ld A,0
+push A
+pop E
+
 ; Go to the main program.
 jp main
 
@@ -337,32 +336,130 @@ jp main
 main:
 
 ; ---------------------------------------------------------------
-; Generate a rising edge on tp_reg(0) to indicate the main loop is
-; starting. 9CK
+; The main loop handles message readout from the detector modules,
+; elimination of duplicates, and storage of these messages in the
+; message buffer. Each time we run through the main loop, we will
+; either do nothing, if no message is waiting, or read a message
+; and set it aside, or write a previous message to the buffer. See
+; diagram Message_Handler.jpg in A3042 documentation for states.
 ; ---------------------------------------------------------------
-ld A,(test_point_addr)
-or A,0x01                    
-ld (test_point_addr),A   
+
+; Check the Detector Module Buffer Ready (DMBRDY) flag. If it's not 
+; set, we skip message reading. 9CK
+ld A,(comm_status_addr)
+and A,dmbrdy_bit_mask
+jp z,main_no_msg
+
+; Read the new message out of the message buffer. The new message
+; will be available in the dmb locations immediately after. 3CK
+ld (dmb_read_addr),A
+
+; Check if the new message has the same ID as our previous message. If 
+; not, we jump to main_new_id. 14CK
+ld A,(dmb_id_addr)
+push A
+pop B
+ld A,(msg_id_prv)
+sub A,B
+jp nz,main_new_id
+
+; Check to see if the previous message has power equal to or greater
+; than the new message. If so, we ignore the new message. We are 
+; rejecting duplicates in our effort to fine the top antenna. 12CK
+ld A,(dmb_pwr_addr)
+push A
+pop B
+ld A,(msg_pwr_prv)
+sub A,B
+jp nc,main_done_messages
+
+; With the new message having greater power, we are going to over-
+; write the previous message. 3CK
+jp main_overwrite_prv
+
+; Check to see if the previous message is valid. If not, we don't
+; save it, but just overwrite it with the new message.
+main_new_id:
+ld A,(msg_id_prv)
+and A,valid_id_mask
+jp z,main_overwrite_prv
+
+; Our previous message ID is valid and different from our new message ID, so
+; we store the previous message before overwriting it with the new message.
+; The previous message may not be the top antenna message for its channel. 
+; We may have several transmitters colliding, with messages coming in from 
+; all of them, alternating between channels as we read out the detector 
+; modules. Such collisions result in multiple messages from the same 
+; channel being written to the message buffer, alternating with messages
+; from other channels. These duplicates will be removed later, when the 
+; Neuroplayer applies our lwdaq_receiver routine to the data. Collisions are,
+; however, rare. Most of the time, the message we store is the top antenna
+; message.
+call save_msg_prv
+
+; Overwrite the previous message with the new message. Our new message has
+; become the previous message, so we jump to main_done_message. 38CK
+main_overwrite_prv:
+ld A,(dmb_id_addr)
+ld (msg_id_prv),A
+ld A,(dmb_hi_addr)
+ld (msg_hi_prv),A
+ld A,(dmb_lo_addr)
+ld (msg_lo_prv),A
+ld A,(dmb_pwr_addr)
+ld (msg_pwr_prv),A
+ld A,(dmb_an_addr)
+ld (msg_an_prv),A
+jp main_done_messages
+
+; No new message is available to be read out. If our previous message
+; is valid, now might be the time to store it. 
+main_no_msg:
+ld A,(msg_id_prv)
+and A,valid_id_mask
+jp z,main_done_messages
+
+; Our interface buffer is empty, now check to see if any detector
+; module has yet to be read out. If so, we won't store the previous 
+; message.
+ld A,(comm_status_addr)
+and A,mrdy_bit_mask
+jp nz,main_done_messages
+
+; Our interface buffer is empty. All but one of our detector module
+; buffers must is empty. But the Detector Module Interface may still 
+; be reading out the final message in the current burst. We check
+; the DMBBUSY bit.
+ld A,(comm_status_addr)
+and A,dmbbusy_bit_mask
+jp nz,main_done_messages
+
+; The interface is not busy, there are not messages in the buffer, 
+; and there are none in the detector modules. We have a valid 
+; previous message. Now is the time to save it.
+call save_msg_prv
+
+; Done with message handling.
+main_done_messages:
 
 ; ---------------------------------------------------------------
-; Increment the main loop counter, which we can use to manage
-; tasks that require less frequency attention. 8CK
+; Decrement the main loop counter, which we use to manage tasks 
+; that require attention less often than message readout. If the
+; counter is zero, jump to the start of the main loop. Otherwise,
+; continue with infrequent tasks. 8CK
 ; ---------------------------------------------------------------
-ld A,(main_cntr)
-inc A
-ld (main_cntr),A
+dec D
+jp nz,main
+ld A,slow_task_skip
+push A
+pop D
 
 ; ---------------------------------------------------------------
 ; Manage communication with the display panel. We alternate between
 ; transmitting a serial instruction to the display panel and 
 ; reading an instruction from the display panel.
 ; ---------------------------------------------------------------
-
-; Check timer to see if we should transmit to display panel. 9CK
-main_dp_comms:
-ld A,(main_cntr)
-sub A,0x40
-jp nz,main_dpi
+main_dp:
 
 ; Transmit the lower four bits of the communication status register
 ; to the display panel. We combine these four bits with the communication
@@ -374,11 +471,10 @@ or A,dp_opcode_comm
 ld (dpod_addr),A
 
 ; Check to see if there is a new byte waiting from the display panel. If
-; not, jump to next task. 9CK
-main_dpi:
+; not, jump to next task.
 ld A,(comm_status_addr)
 and A,dpirdy_bit_mask
-jp z,main_message_handler
+jp z,main_dp_done
 
 ; Read the new byte received from the display panel and store in C.
 ld A,(dpid_addr)
@@ -388,7 +484,7 @@ pop C
 ; Check the opcode. If not one we recognise, go to message handler.
 and A,0xF0
 sub A,dp_opcode_sw 
-jp nz,main_message_handler
+jp nz,main_dp_done
 
 ; Check configuration bit state and update the configuration flag
 ; in the controller.
@@ -399,148 +495,53 @@ jp z,main_dp_config
 ld A,0x01
 main_dp_config:
 ld (dpcr_addr),A
-jp main_message_handler
 
-; ---------------------------------------------------------------
-; The main loop handles message readout from the detector modules,
-; elimination of duplicates, and storage of these messages in the
-; message buffer. Each time we run through the main loop, we will
-; either do nothing, if no message is waiting, or read a message
-; and set it aside, or write a previous message to the buffer. See
-; diagram Message_Handler.jpg in A3042 documentation for states.
-; ---------------------------------------------------------------
-main_message_handler:
-
-; Check the message ready (MRDY) flag. If it's not set, jump to 
-; main_no_mrdy. 9CK
-ld A,(comm_status_addr)
-and A,dmbrdy_bit_mask
-jp z,main_no_mrdy
-
-; Read the new message. We assert Detector Module Buffer Read (DMBRD) to 
-; read the message out of the Detector Module Buffer. This message is 
-; guaranteed by the Detector Module Interface to have a valid ID. 38CK
-ld (dmb_read_addr),A
-ld A,(dmb_id_addr)
-ld (msg_id),A
-ld A,(dmb_hi_addr)
-ld (msg_hi),A
-ld A,(dmb_lo_addr)
-ld (msg_lo),A
-ld A,(dmb_pwr_addr)
-ld (msg_pwr),A
-ld A,(dmb_an_addr)
-ld (msg_an),A
-
-; Check if the new message has the same ID as our previous message. If 
-; not, we jump to main_new_id. 14CK
-ld A,(msg_id)
-push A
-pop B
-ld A,(msg_id_prv)
-sub A,B
-jp nz,main_new_id
-
-; Check to see if the new message has greater power. If not, we ignore
-; this message. We are rejecting duplicates in our effort to fine the
-; top antenna. 12CK
-ld A,(msg_pwr_prv)
-push A
-pop B
-ld A,(msg_pwr)
-sub A,B
-jp c,main_done_messages
-
-; With the new message having greater power, we jump to main_overwrite_prv.
-jp main_overwrite_prv
-
-; Check to see if the previous message is valid. If not, jump to 
-; main_overwrite_prv.
-main_new_id:
-ld A,(msg_id_prv)
-and A,valid_id_mask
-jp z,main_overwrite_prv
-
-; Our previous message ID is valid and different from our new message ID, so
-; we store the previous message before jumping to main_overwrite_prv. The 
-; previous message may not be the top antenna message for its channel. We may
-; have several transmitters colliding, with messages coming in from all of 
-; them, alternating between channels as we read out the detector modules.
-; Such collisions are rare, but they will result in multiple messages from
-; the same channel being written to the message buffer. These duplicates
-; will be removed later, when the Neuroplayer applies our lwdaq_receiver 
-; routine to the data.
-call save_msg_prv
-
-; Overwrite the previous message with the new message. If we have not yet
-; saved the previous message, it will never be saved. Our new message has
-; become the previous message, so we jump to main_done_message.
-main_overwrite_prv:
-ld A,(msg_id)
-ld (msg_id_prv),A
-ld A,(msg_hi)
-ld (msg_hi_prv),A
-ld A,(msg_lo)
-ld (msg_lo_prv),A
-ld A,(msg_pwr)
-ld (msg_pwr_prv),A
-ld A,(msg_an)
-ld (msg_an_prv),A
-jp main_done_messages
-
-; Now new message is ready. We check to see if the previous message is 
-; valid. If not, jump to main_done_messages.
-main_no_mrdy:
-ld A,(msg_id_prv)
-and A,valid_id_mask
-jp z,main_done_messages
-
-; No new message is ready. There is a lull in reception and our previous
-; message is valid. There is no need to wait for any further messages: this
-; message is most likely the top antenna message for its sample, and is
-; certainly the last message for the sample.
-call save_msg_prv
-
-; Done with dealing with messages.
-main_done_messages:
+; Done with display panel communication.
+main_dp_done:
 
 ; ---------------------------------------------------------------
 ; Check the Device Job Register. If it's not zero, take action and 
 ; if requested action is complete, clear the register to indicate 
-; the job is done. 9CK
+; the job is done. 
 ; ----------------------------------------------------------------
 ld A,(relay_djr_addr)
 add A,0x00
 jp z,djr_done
 
-; Check for a command transmit job.
+; Check for a command transmit job. These are the only jobs we
+; execute. The command transmit job is an emmulation of the
+; LWDAQ job of the same name, where a sixteen-bit command would
+; be transmitted to a LWDAQ Device by a LWDAQ Driver. The Octal
+; Data Receiver (ODR) is a LWDAQ Device, and we want the TCB to 
+; look like an ODR, so we take the command transmit job and use
+; the sixteen bits that are provided by such jobs as instructions,
+; just as the ODR would do, except in this case, the TCB has the
+; command bits immediately, whereas in the ODR case the bits 
+; would be transmitted over a LWDAQ cable to the ODR, where the
+; ODR would receive and interpret them.
 push A
 sub A,command_job
 pop A
 jp nz,not_command_job
 
-; Generate a rising edge of tp_reg(2).
+; Generate a rising edge of tp_reg(2) to show we are interpreting
+; a sixteen-bit command.
 ld A,(test_point_addr)
 or A,0x04                    
 ld (test_point_addr),A   
 
-; ----------------------------------------------------------------------
 ; Read the command and see if it matches the reset command. If so, we
-; reboot the controller. The reboot does not reset the device job register.
-; Instead, the register will be cleared after re-boot by the initialization
-; routine, to indicate that the reset is complete.
-; ----------------------------------------------------------------------
+; reboot the controller. The reboot does not reset the device job 
+; register. Instead, the register will be cleared after re-boot by the 
+; initialization routine, to indicate that the reset is complete.
 ld A,(relay_crlo_addr)
 and A,reset_bit_mask
 jp z,msg_select
 ld (cpu_rst_addr),A
 wait
 
-; ----------------------------------------------------------------------
 ; Message Select Command. We interpret the command and modify the message
 ; selection array accordingly.
-; ----------------------------------------------------------------------
-
 msg_select:
 ld A,(relay_crlo_addr)
 and A,sel_bit_mask
@@ -592,46 +593,34 @@ dec B
 jp nz,select_all_loop
 jp done_cmd_xmit
 
-;---------------------------------------------------------------------
 ; Other commands we ignore.
-;---------------------------------------------------------------------
 other_commands:
 jp done_cmd_xmit
 
-;---------------------------------------------------------------------
-; Done with all supported command jobs.  Generate a falling, edge on 
+; Done with all supported command jobs. Generate a falling, edge on 
 ; tp_reg(2). 
-;----------------------------------------------------------------------
 done_cmd_xmit:
 ld A,(test_point_addr)
 and A,0xFB                    
 ld (test_point_addr),A   
 jp djr_reset
 
-;---------------------------------------------------------------------
 ; Other jobs we ignore.
-;---------------------------------------------------------------------
 not_command_job:
 jp djr_reset
 
-; ------------------------------------------------------------------
 ; Reset the device job register. Any write to the DJR reset location 
 ; clears DJR to zero.
-; ------------------------------------------------------------------
 djr_reset:
 ld A,0x01
 ld (relay_djr_rst_addr),A
 
-; ---------------------------------------------------------------
-; Generate a falling edge on tp_reg(0) to indicate the main loop is
-; done. 9CK
-; ---------------------------------------------------------------
+; Done with device job register.
 djr_done:   
-ld A,(test_point_addr)
-and A,0xFE                
-ld (test_point_addr),A  
 
+; ------------------------------------------------------------------
 ; Return to top of main loop. 3CK
+; ------------------------------------------------------------------
 jp main 
 
 
@@ -841,12 +830,18 @@ push A
 push H
 push IX
 
+; Generate a rising edge on tp_reg(0) to indicate the main loop is
+; starting. 9CK
+ld A,(test_point_addr)
+or A,0x01                    
+ld (test_point_addr),A   
+
 ; Check that this channel is among those enabled by the channel select
 ; array. If not, set the message identifier to the invalid identifier
 ; and terminate the readout. 
 ld HL,zero_channel_select
 push H
-ld A,(msg_id)
+ld A,(msg_id_prv)
 push A
 pop IX
 ld A,(IX)
@@ -920,11 +915,18 @@ ld A,(msg_an_prv)
 ld (msg_write_addr),A
 clri
 
-; Set the previous message ID to invalid_id to mark it as written. Pop 
-; the registers and flags off the stack.
+; Set the previous message ID to invalid_id to mark it as written. 
 save_prv_done:
 ld A,invalid_id
 ld (msg_id_prv),A
+
+; Generate a falling edge on tp_reg(0) to indicate the main loop is
+; done.
+ld A,(test_point_addr)
+and A,0xFE                
+ld (test_point_addr),A  
+
+; Pop the flags off the stack.
 pop IX
 pop H
 pop A
