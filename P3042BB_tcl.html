@@ -6,19 +6,7 @@
 -->
 </STYLE>
 </HEAD>
-<PRE><A name="pn221207190507"></A><B><U><big>pn221207190507</big></U></B>
-#Start recording tcl command: 12/7/2022 16:40:32
-#Project Location: C:/Kevan/A3042/P3042BB; Project name: P3042BB
-prj_project open "C:/Kevan/A3042/P3042BB/P3042BB.ldf"
-prj_run Export -impl impl1
-prj_run Export -impl impl1
-prj_run Export -impl impl1
-prj_run Export -impl impl1
-#Stop recording: 12/7/2022 19:05:07
-
-
-
-<A name="pn221207224603"></A><B><U><big>pn221207224603</big></U></B>
+<PRE><A name="pn221207224603"></A><B><U><big>pn221207224603</big></U></B>
 #Start recording tcl command: 12/7/2022 22:30:59
 #Project Location: C:/Kevan/A3042/P3042BB; Project name: P3042BB
 prj_project open "C:/Kevan/A3042/P3042BB/P3042BB.ldf"
@@ -141,6 +129,35 @@ prj_run Export -impl impl1
 prj_run Export -impl impl1
 prj_run Export -impl impl1
 #Stop recording: 12/9/2022 13:00:44
+
+
+
+<A name="pn221209145839"></A><B><U><big>pn221209145839</big></U></B>
+#Start recording tcl command: 12/9/2022 13:02:01
+#Project Location: C:/Kevan/A3042/P3042BB; Project name: P3042BB
+prj_project open "C:/Kevan/A3042/P3042BB/P3042BB.ldf"
+prj_run Export -impl impl1
+prj_run Synthesis -impl impl1
+prj_run Synthesis -impl impl1
+prj_run Map -impl impl1
+prj_run Export -impl impl1
+prj_dev set -part LCMXO2-4000HE-5TG144C
+prj_dev set -part LCMXO2-4000HE-4TG144C
+prj_run Map -impl impl1
+prj_run PAR -impl impl1
+prj_run PAR -impl impl1 -task IOTiming
+prj_dev set -part LCMXO2-2000HC-4TG144C
+prj_run PAR -impl impl1
+prj_run PAR -impl impl1 -task IOTiming
+prj_dev set -part LCMXO2-2000HC-6TG144C
+prj_run PAR -impl impl1
+prj_dev set -part LCMXO2-4000ZE-1TG144C
+prj_run PAR -impl impl1
+prj_dev set -part LCMXO2-7000HC-5TG144C
+prj_run Export -impl impl1
+prj_run Export -impl impl1
+prj_run Export -impl impl1
+#Stop recording: 12/9/2022 14:58:39
 
 
 

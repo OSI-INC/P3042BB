@@ -305,7 +305,7 @@ ld A,select_all_code
 ld (irq_reset_addr),A  
 
 ; Unmask the timer and lamp interrupts. Interrupts are currently disabled 
-; by the I flag.
+; by the I flag. Leave the DMBRDY and second timer interrupts disabled.
 ld A,int_ts_mask
 or A,int_lamps_mask            
 ld (irq_mask_addr),A  
@@ -314,7 +314,7 @@ ld (irq_mask_addr),A
 ; is ready for further commands. Any write to the reset location will do.
 ld (relay_djr_rst_addr),A
 
-; Falling edge on tp_reg(2) indicates the end of initialization.
+; Falling edge on tp_reg(2).
 ld A,(test_point_addr)
 and A,0xFB                  
 ld (test_point_addr),A   
@@ -351,7 +351,8 @@ and A,dmbrdy_bit_mask
 jp z,main_no_msg
 
 ; Read the new message out of the message buffer. The new message
-; will be available in the dmb locations immediately after. 3CK
+; will be available in the dmb locations immediately after. The
+; message buffer guarantees that the message ID is valid. 3CK
 ld (dmb_read_addr),A
 
 ; Check if the new message has the same ID as our previous message. If 
@@ -426,13 +427,21 @@ ld A,(comm_status_addr)
 and A,mrdy_bit_mask
 jp nz,main_done_messages
 
-; Our interface buffer is empty. All but one of our detector module
-; buffers must is empty. But the Detector Module Interface may still 
+; Our interface buffer is empty. All or all but one of our detector 
+; module buffers is empty. But the Detector Module Interface may still 
 ; be reading out the final message in the current burst. We check
 ; the DMBBUSY bit.
 ld A,(comm_status_addr)
 and A,dmbbusy_bit_mask
 jp nz,main_done_messages
+
+; One last check: a new message may now be available in the interface
+; buffer, as a result of the time taken to check the previous message
+; ID, the MRDY flag, and the DMBBUSY flag. So check the DMBRDY flag
+; one more time. If it's set, don't save the previous message.
+ld A,(comm_status_addr)
+and A,dmbrdy_bit_mask
+jp z,main_done_messages
 
 ; The interface is not busy, there are not messages in the buffer, 
 ; and there are none in the detector modules. We have a valid 
@@ -830,8 +839,8 @@ push A
 push H
 push IX
 
-; Generate a rising edge on tp_reg(0) to indicate the main loop is
-; starting. 9CK
+; Generate a rising edge on tp_reg(0) to indicate the start of
+; the message write.
 ld A,(test_point_addr)
 or A,0x01                    
 ld (test_point_addr),A   
@@ -920,8 +929,8 @@ save_prv_done:
 ld A,invalid_id
 ld (msg_id_prv),A
 
-; Generate a falling edge on tp_reg(0) to indicate the main loop is
-; done.
+; Generate a falling edge on tp_reg(0) to indicate the message write
+; is done.
 ld A,(test_point_addr)
 and A,0xFE                
 ld (test_point_addr),A  

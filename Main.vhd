@@ -28,6 +28,8 @@
 -- takes 38-87 PCK cycles. Running with PCK at 20 MHz in the 7000HC 
 -- chip, that's 3 us, or in the 4000ZE chip, 6 us.
 
+-- V3.4, 10-DEC-22: Fix bug in duplicate elimination.
+
 -- Global constants and types.  
 library ieee;  
 use ieee.std_logic_1164.all;
@@ -839,10 +841,10 @@ begin
 			end if;
 
 			-- The detector module receive interrupt is set when we see
-			-- that there are messages in the incoming message buffer.
+			-- that there are messages in the Detector Module Buffer.
 			if (irq_rst(1) = '1') then
 				irq_bits(1) <= '0';
-			elsif (MRDY = '1')
+			elsif (DMBEMPTY = '0')
 					or (irq_set(1) = '1') then
 				irq_bits(1) <= '1';
 			end if;
@@ -1234,6 +1236,6 @@ begin
 	-- zero through two. We have TP4 showing us any changes in the upstream data bus.
 	TP1 <= tp_reg(0);
 	TP2 <= DMBWR;
-	TP3 <= DMBRD;
+	TP3 <= DMBBUSY;
 	TP4 <= dub(0) xor dub(1) xor dub(2) xor dub(3) xor dub(4) xor dub(5) xor dub(6) xor dub(7);
 end behavior;
