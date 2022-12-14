@@ -1234,8 +1234,10 @@ begin
 	
 	-- Test points. We have TP1..TP3 showing the microprocessor-controlled registers 
 	-- zero through two. We have TP4 showing us any changes in the upstream data bus.
-	TP1 <= tp_reg(0);
-	TP2 <= DMBWR;
-	TP3 <= DMBBUSY;
-	TP4 <= dub(0) xor dub(1) xor dub(2) xor dub(3) xor dub(4) xor dub(5) xor dub(6) xor dub(7);
+	TP1 <= tp_reg(0); -- A pulse during write to main message buffer.
+	TP2 <= tp_reg(1); -- A pulse during interrupt execution.
+	TP3 <= DMBBUSY; -- A pulse while detector module interface is reading daisy chain.
+	TP4 <= dub(0) xor dub(1) xor dub(2) 
+		xor dub(3) xor dub(4) xor dub(5) 
+		xor dub(6) xor dub(7); -- Shows changes in daisy chain data lines.
 end behavior;
