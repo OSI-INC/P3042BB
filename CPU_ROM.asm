@@ -441,7 +441,7 @@ jp nz,main_done_messages
 ; one more time. If it's set, don't save the previous message.
 ld A,(comm_status_addr)
 and A,dmbrdy_bit_mask
-jp z,main_done_messages
+jp nz,main_done_messages
 
 ; The interface is not busy, there are not messages in the buffer, 
 ; and there are none in the detector modules. We have a valid 

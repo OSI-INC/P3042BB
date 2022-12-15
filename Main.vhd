@@ -77,7 +77,7 @@ entity main is
 -- Version numbers.
 	constant hardware_id : integer := 42;
 	constant hardware_version : integer := 1;
-	constant firmware_version : integer := 3;
+	constant firmware_version : integer := 4;
 
 -- Configuration of OSR8.
 	constant prog_addr_len : integer := 11;
