@@ -64,7 +64,7 @@ const valid_id_mask 0x0F
 const config_bit_mask 0x01
 const dpirdy_bit_mask 0x10
 const dmbrdy_bit_mask 0x20
-const dmbbusy_bit_mask 0x40
+const dmibsy_bit_mask 0x40
 const mrdy_bit_mask 0x80
 
 ; Display panel opcodes
@@ -351,8 +351,10 @@ and A,dmbrdy_bit_mask
 jp z,main_no_msg
 
 ; Read the new message out of the message buffer. The new message
-; will be available in the dmb locations immediately after. The
-; message buffer guarantees that the message ID is valid. 3CK
+; will be available in the dmb locations immediately after we write
+; to the Detector Module Buffer Read location. The message buffer 
+; guarantees that the message ID is valid before storing in the 
+; buffer. 3CK
 ld (dmb_read_addr),A
 
 ; Check if the new message has the same ID as our previous message. If 
@@ -427,12 +429,11 @@ ld A,(comm_status_addr)
 and A,mrdy_bit_mask
 jp nz,main_done_messages
 
-; Our interface buffer is empty. All or all but one of our detector 
-; module buffers is empty. But the Detector Module Interface may still 
-; be reading out the final message in the current burst. We check
-; the DMBBUSY bit.
+; Our interface buffer is empty, no detector module is asserting MRDY,
+; but the Detector Module Interface may still be reading out the final 
+; message in the current burst. We check the DMBBUSY bit.
 ld A,(comm_status_addr)
-and A,dmbbusy_bit_mask
+and A,dmibsy_bit_mask
 jp nz,main_done_messages
 
 ; One last check: a new message may now be available in the interface
@@ -443,9 +444,10 @@ ld A,(comm_status_addr)
 and A,dmbrdy_bit_mask
 jp nz,main_done_messages
 
-; The interface is not busy, there are not messages in the buffer, 
+; The interface is not busy, there are no messages in the buffer, 
 ; and there are none in the detector modules. We have a valid 
-; previous message. Now is the time to save it.
+; previous message and the current burst is over. It is time to
+; save the previous message.
 call save_msg_prv
 
 ; Done with message handling.
@@ -837,6 +839,7 @@ save_msg_prv:
 push F 
 push A
 push H
+push L
 push IX
 
 ; Generate a rising edge on tp_reg(0) to indicate the start of
@@ -859,9 +862,7 @@ jp z,save_prv_done
 
 ; Transmit a message to the display panel. The eight-bit message consists
 ; of an operation code in the top four bits and the lower four bits of the 
-; message identifier. The transmission will take 9 us, which is 180 
-; instructions at 20 MHz. This routine will conclude in roughly 60
-; instructions.
+; message identifier. 
 ld A,(msg_id_prv)
 and A,valid_id_mask
 or A,dp_opcode_msg
@@ -937,6 +938,7 @@ ld (test_point_addr),A
 
 ; Pop the flags off the stack.
 pop IX
+pop L
 pop H
 pop A
 pop F

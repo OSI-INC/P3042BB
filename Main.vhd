@@ -241,16 +241,19 @@ architecture behavior of main is
 	signal DPXWR : std_logic; -- Display Panel Transmit Write
 	signal DPXRD : std_logic; -- Display Panel Transmit Read
 	signal DPXEMPTY : std_logic; -- Display Panel Transmit Buffer Empty
+	signal DPXFULL : std_logic; -- Display Panel Transmit Buffer Full
 	signal DPRWR : std_logic; -- Display Panel Receiver Write
 	signal DPRRD : std_logic; -- Display Panel Receiver Read
 	signal DPREMPTY : std_logic; -- Display Panel Receiver Buffer Empty
+	signal DPRFULL : std_logic; -- Display Panel Receiver Buffer Full
 	signal dp_in, dp_in_waiting, dp_out: std_logic_vector(7 downto 0);
 	
 -- Detector Module Buffer Interface
 	signal DMBWR : std_logic; -- Detector Module Buffer Write
 	signal DMBRD : std_logic; -- Detector Module Buffer Read
 	signal DMBEMPTY : std_logic; -- Detector Module Buffer Empty
-	signal DMBBUSY : std_logic; -- Detector Module Buffer Busy
+	signal DMBFULL : std_logic; -- Detector Module Buffer Full
+	signal DMIBSY : std_logic; -- Detector Module Interface Busy
 	signal dmb_in, dmb_out : std_logic_vector(39 downto 0);
 		
 -- General-Purpose Constant
@@ -600,7 +603,8 @@ begin
 			Reset => RESET,
 			RPReset => RESET,
 			Q => dp_out,
-			Empty => DPXEMPTY
+			Empty => DPXEMPTY,
+			Full => DPXFULL
 		);
 
 -- The Serial Data In Buffer (SDI Buffer) is wher the Display
@@ -617,7 +621,8 @@ begin
 			Reset => RESET,
 			RPReset => RESET,
 			Q => dp_in_waiting,
-			Empty => DPREMPTY
+			Empty => DPREMPTY,
+			Full => DPRFULL
 		);
 
 -- The Detector Module Buffer is where the Detector Module Reader puts
@@ -634,7 +639,8 @@ begin
         Reset=> RESET,
         RPReset => RESET,
         Q => dmb_out,
-        Empty => DMBEMPTY
+        Empty => DMBEMPTY,
+		Full => DMBFULL
 	);
 
 -- The Memory Manager maps eight-bit read and write access to Detector Module 
@@ -690,7 +696,7 @@ begin
 					cpu_data_in(3) <= to_std_logic(CONFIG);
 					cpu_data_in(4) <= not DPREMPTY;
 					cpu_data_in(5) <= not DMBEMPTY;
-					cpu_data_in(6) <= DMBBUSY;
+					cpu_data_in(6) <= DMIBSY;
 					cpu_data_in(7) <= MRDY;
 				when dpid_addr => 
 					cpu_data_in <= dp_in_waiting;
@@ -762,7 +768,7 @@ begin
 							when indicators_addr + 1 to indicators_addr + 15 =>
 								indicator_control(to_integer(unsigned(cpu_addr(3 downto 0)))) 
 									<= cpu_data_out(0);
-							when dpod_addr => DPXWR <= '1';
+							when dpod_addr => if (DPXFULL = '0') then DPXWR <= '1'; end if;
 							when dmb_read_addr => DMBRD <= '1';
 						end case;
 					end if;
@@ -828,6 +834,24 @@ begin
 				irq_bits(0) <= '1';
 			end if;
 
+			-- The detector module receive interrupt is set when we see
+			-- that there are messages in the Detector Module Buffer.
+			if (irq_rst(1) = '1') then
+				irq_bits(1) <= '0';
+			elsif (DMBEMPTY = '0')
+					or (irq_set(1) = '1') then
+				irq_bits(1) <= '1';
+			end if;
+			
+			-- The detector module error interrupt is set when we see
+			-- a rising edge on the DMERR input. 
+			if (irq_rst(2) = '1') then
+				irq_bits(2) <= '0';
+			elsif (DMERR = '1')
+					or (irq_set(2) = '1') then
+				irq_bits(2) <= '1';
+			end if;
+
 			-- The Timer Two Interrupt is set when the counter is zero
 			-- and reset when we write of 1 to irq_rst(3). We detect
 			-- the first PCK clock period in which the counter becomes
@@ -839,25 +863,7 @@ begin
 					or (irq_set(3) = '1') then
 				irq_bits(3) <= '1';
 			end if;
-
-			-- The detector module receive interrupt is set when we see
-			-- that there are messages in the Detector Module Buffer.
-			if (irq_rst(1) = '1') then
-				irq_bits(1) <= '0';
-			elsif (DMBEMPTY = '0')
-					or (irq_set(1) = '1') then
-				irq_bits(1) <= '1';
-			end if;
-						
-			-- The detector module error interrupt is set when we see
-			-- a rising edge on the DMERR input. 
-			if (irq_rst(2) = '1') then
-				irq_bits(2) <= '0';
-			elsif (DMERR = '1')
-					or (irq_set(2) = '1') then
-				irq_bits(2) <= '1';
-			end if;
-						
+												
 			-- The CPU software interrupts that the CPU sets and resets
 			-- itself through the irq_rst and irq_set control registers.
 			for i in 4 to 7 loop
@@ -980,11 +986,14 @@ begin
 	-- Read Control (DMRC) to start the read, as required by the daisy 
 	-- chain protocol. It asserts Data Strobe Upstream (DSU) to get the 
 	-- first byte. Subsequent DS cycles get the remaining bytes. Total read 
-	-- time is 500 ns * 13 = 6.5 us. In principle, the interface is active
-	-- only when a message is ready. But if one of the detector modules
+	-- time is 500 ns * 13 = 6.5 us. If one of the detector modules
 	-- fails, breaking the daisy-chain, those upstream will assert MRDY
-	-- continuously. The interface sets a flag DMBBUSY when it is not in
-	-- its rest state, and the CPU can check this flag.
+	-- continuously. The buffer will fill up. We stop writing to the buffer
+	-- when it is full. The interface sets a flag DMIBSY when it is not in
+	-- its rest state. This flag is available to the CPU in the communications
+	-- status register. The detector module interface will not write to
+	-- its buffer when the buffer is full. It keeps the detector modules
+	-- waiting until the buffer is no longer full.
 	Detector_Module_Interface : process (SCK,RESET) is
 	variable state, next_state : integer range 0 to 15;
 	begin
@@ -994,16 +1003,16 @@ begin
 			state := 0;
 			DMRC <= '0';
 			DSU <= '0';
-			DMBBUSY <= '0';
+			DMIBSY <= '0';
 		elsif rising_edge(SCK) then
 			next_state := state + 1;
 			dmb_in <= dmb_in;
 			DMBWR <= '0';
-			DMBBUSY <= '1';
+			DMIBSY <= '1';
 			case state is
 				when 0 => 
-					if (MRDY = '0') then next_state := 0; end if;
-					DMBBUSY <= '0';
+					if (MRDY = '0') or (DMBFULL = '1') then next_state := 0; end if;
+					DMIBSY <= '0';
 					DMRC <= '0'; DSU <= '0';
 				when 1 => 
 					DMRC <= '1'; DSU <= '0';
@@ -1158,7 +1167,7 @@ begin
 			DPRWR <= '0';
 			case state is 
 				when 0 => 
-					if (RSDI = '0') then
+					if (RSDI = '0') and (DPRFULL = '0') then
 						state := 1;
 					else 
 						state := 0;
@@ -1236,7 +1245,7 @@ begin
 	-- zero through two. We have TP4 showing us any changes in the upstream data bus.
 	TP1 <= tp_reg(0); -- A pulse during write to main message buffer.
 	TP2 <= tp_reg(1); -- A pulse during interrupt execution.
-	TP3 <= DMBBUSY; -- A pulse while detector module interface is reading daisy chain.
+	TP3 <= DMIBSY; -- A pulse while detector module interface is reading daisy chain.
 	TP4 <= dub(0) xor dub(1) xor dub(2) 
 		xor dub(3) xor dub(4) xor dub(5) 
 		xor dub(6) xor dub(7); -- Shows changes in daisy chain data lines.

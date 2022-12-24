@@ -16,8 +16,8 @@ CoreRevision=5.8
 ModuleName=FIFO40
 SourceFormat=VHDL
 ParameterFileVersion=1.0
-Date=12/09/2022
-Time=07:56:22
+Date=12/22/2022
+Time=14:01:50
 
 [Parameters]
 Verilog=0
@@ -28,9 +28,9 @@ Expression=BusA(0 to 7)
 Order=Big Endian [MSB:LSB]
 IO=0
 FIFOImp=LUT Based
-RDepth=8
+RDepth=64
 RWidth=40
-WDepth=8
+WDepth=64
 WWidth=40
 regout=0
 CtrlByRdEn=0
@@ -50,4 +50,4 @@ WDataCount=0
 EnECC=0
 
 [Command]
-cmd_line= -w -n FIFO40 -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type ebfifo -depth 8 -width 40 -rwidth 40 -pfu_fifo -no_enable -pe -1 -pf -1
+cmd_line= -w -n FIFO40 -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type ebfifo -depth 64 -width 40 -rwidth 40 -pfu_fifo -no_enable -pe -1 -pf -1
