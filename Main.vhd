@@ -30,6 +30,11 @@
 
 -- V3.4, 10-DEC-22: Fix bug in duplicate elimination.
 
+-- V4.1, 24-DEC-22: Reassign DC4 as Detector Module Configure (DMCFG) under
+-- control of the CPU, for use in conjunction with Detector Module Read
+-- Control (DMRC) to let the detector modules figure out their own location
+-- in the daisy chain.
+
 -- Global constants and types.  
 library ieee;  
 use ieee.std_logic_1164.all;
@@ -66,7 +71,7 @@ entity main is
 		DMRC : out std_logic; -- Detector Module Read Control (DC1)
 		DMERR_in : in std_logic; -- Detecor Module Error (DC2)
 		MRDY_in : in std_logic; -- Incoming Message Flag (DC3)
-		SHOWDM : out std_logic; -- Detector Module Show Lamps (DC4)
+		DMCFG : inout std_logic; -- Detector Module Show Lamps (DC4)
 		SDI_in : in std_logic; -- Serial Data In (DC5)
 		SDO : out std_logic; -- Serial Data Out (DC6)
 		DMCK : out std_logic; -- Demodulator Clock (DC7)
@@ -182,6 +187,7 @@ architecture behavior of main is
 	constant test_point_addr : integer := 6; -- Test Point Register (Read/Write)
 	constant msg_write_addr : integer := 7; -- Message Write Data (Write)
 	constant dm_reset_addr : integer := 8; -- Detector Module Reset (Write)
+	constant dm_config_addr : integer := 9; -- Detector Module Configure (Write)
 	constant irq_tmr1_addr : integer := 13; -- Timer One value (Read)
 	constant relay_djr_addr : integer := 14; -- Relay Device Job Register (Read)
 	constant relay_crhi_addr : integer := 15; -- Relay Command Register HI (Read)
@@ -738,6 +744,7 @@ begin
 			DPRRD <= '0';
 			DMBRD <= '0';
 			DPCONFIG <= false;
+			DMCFG <= '0';
 			for i in 1 to 15 loop indicator_control(i) <= '0'; end loop;
 		elsif falling_edge(PCK) then
 			irq_rst <= zero_data_byte;
@@ -764,6 +771,7 @@ begin
 								mwr_data <= cpu_data_out;
 								MWRS <= true;
 							when dm_reset_addr => DMRST_BY_CPU <= (cpu_data_out(0) = '1');
+							when dm_config_addr => DMCFG <= cpu_data_out(0);
 							when relay_djr_rst_addr => DJRRST <= true;
 							when indicators_addr + 1 to indicators_addr + 15 =>
 								indicator_control(to_integer(unsigned(cpu_addr(3 downto 0)))) 
@@ -989,11 +997,13 @@ begin
 	-- time is 500 ns * 13 = 6.5 us. If one of the detector modules
 	-- fails, breaking the daisy-chain, those upstream will assert MRDY
 	-- continuously. The buffer will fill up. We stop writing to the buffer
-	-- when it is full. The interface sets a flag DMIBSY when it is not in
+	-- when it is full and keep the detector module waiting until the buffer 
+	-- is no longer full. The interface sets a flag DMIBSY when it is not in
 	-- its rest state. This flag is available to the CPU in the communications
-	-- status register. The detector module interface will not write to
-	-- its buffer when the buffer is full. It keeps the detector modules
-	-- waiting until the buffer is no longer full.
+	-- status register. Whe the interface sees Detector Module Configure
+	-- (DMCFG) asserted, it starts a configuration acces, asserting DMRC
+	-- until DMCFG is unasserted. While both DMCFG and DMRC are asserted,
+	-- the detector modules calculate their position in the daisy chain.
 	Detector_Module_Interface : process (SCK,RESET) is
 	variable state, next_state : integer range 0 to 15;
 	begin
@@ -1011,7 +1021,11 @@ begin
 			DMIBSY <= '1';
 			case state is
 				when 0 => 
-					if (MRDY = '0') or (DMBFULL = '1') then next_state := 0; end if;
+					if (DMCFG = '1') then
+						next_state := 15;
+					elsif (MRDY = '0') or (DMBFULL = '1') then 
+						next_state := 0; 
+					end if;
 					DMIBSY <= '0';
 					DMRC <= '0'; DSU <= '0';
 				when 1 => 
@@ -1043,8 +1057,16 @@ begin
 					DMRC <= '0'; DSU <= '0';
 					next_state := 0;
 					DMBWR <= '1';
+				when 15 =>
+					DMRC <= '1'; DSU <= '0';
+					if (DMCFG = '1') then
+						next_state := 15;
+					else
+						next_state := 0; 
+					end if;
 				when others =>
 					DMRC <= '0'; DSU <= '0';
+					next_state := 0;
 			end case;
 			state := next_state;
 		end if;
@@ -1064,7 +1086,6 @@ begin
 			indicators(19) <= to_std_logic(not HIDE);
 			SHOW <= (switches(2) = '1');
 			indicators(18) <= to_std_logic(not SHOW); 
-			SHOWDM <= switches(2);
 		end if;
 		
 		-- Set the indicator lamps according to the indicator control
