@@ -700,11 +700,11 @@ begin
 					cpu_data_in(7) <= MRDY;
 				when dpid_addr => 
 					cpu_data_in <= dp_in_waiting;
-				when dmb_id_addr => cpu_data_in <= dmb_in(39 downto 32);
-				when dmb_hi_addr => cpu_data_in <= dmb_in(31 downto 24);
-				when dmb_lo_addr => cpu_data_in <= dmb_in(23 downto 16);
-				when dmb_pwr_addr => cpu_data_in <= dmb_in(15 downto 8);
-				when dmb_an_addr => cpu_data_in <= dmb_in(7 downto 0);
+				when dmb_id_addr => cpu_data_in <= dmb_out(39 downto 32);
+				when dmb_hi_addr => cpu_data_in <= dmb_out(31 downto 24);
+				when dmb_lo_addr => cpu_data_in <= dmb_out(23 downto 16);
+				when dmb_pwr_addr => cpu_data_in <= dmb_out(15 downto 8);
+				when dmb_an_addr => cpu_data_in <= dmb_out(7 downto 0);
 				when others => cpu_data_in <= max_data_byte;
 			end case;
 		when others =>
