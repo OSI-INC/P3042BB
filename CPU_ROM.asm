@@ -19,6 +19,7 @@ const cpu_rst_addr 0x0E05 ; Program Reset (Write)
 const test_point_addr 0x0E06 ; Test Point Register (Read/Write)
 const msg_write_addr 0x0E07 ; Message Write Data (Write)
 const dm_reset_addr 0x0E08 ; Detector Module Reset (Write)
+const dm_config_addr 0x0E09 ; Detector Module Configure (Write)
 const irq_tmr1_addr 0x0E0D ; The interrupt timer value (Read)
 const relay_djr_addr 0x0E0E ; Relay Device Job Register (Read)
 const relay_crhi_addr 0x0E0F ; Relay Command Register HI (Read)
@@ -103,6 +104,7 @@ const activity_linger 4 ; Timer periods of light per message received
 const flash_linger 200 ; Timer periods for reset flash
 const slow_task_skip 100 ; Main event loops between slow tasks
 const dmrst_length 10 ; PCK periods for reset pulse
+const dmcfg_length 30 ; PCK periods for configuration
 
 ; Message Identifiers
 const clock_id 0x00 ; Clock message identifier.
@@ -261,6 +263,15 @@ dly A
 ; after the reset is over.
 ld A,0x00
 ld (dm_reset_addr),A
+
+; Assert Detector Module Configure (DMCFG) for enough time to allow the detector modules 
+; to figure out their place in the daisy chain.
+ld A,0x01
+ld (dm_config_addr),A
+ld A,dmcfg_length
+dly A
+ld A,0x00
+ld (dm_config_addr),A
 
 ; Write a zero clock message into the message buffer. We use "nop" instructions
 ; as a delay between writes to the message buffer so as to allow the buffer time
