@@ -3,7 +3,8 @@
 -- V1.1, 15-SEP-22: Based upon P3038BB v8.3.
 
 -- V1.2, 16-SEP-22: Use DC5 and DC6 for communication with display
--- panel. We use DC6 for Serial Data Out (SDO) and DC5 for Serial-- Data In (SDI). These signals were SHOW and HIDE on the ALT
+-- panel. We use DC6 for Serial Data Out (SDO) and DC5 for Serial
+-- Data In (SDI). These signals were SHOW and HIDE on the ALT
 -- detector modules. Add reset value high-impedance for RECEIVED_pin 
 -- and INCOMING_pin. Prior ommission of explicit reset values was 
 -- causing RECEIVED_pin to be driven HI by the base board, stopping 
@@ -30,10 +31,14 @@
 
 -- V3.4, 10-DEC-22: Fix bug in duplicate elimination.
 
--- V4.1, 24-DEC-22: Reassign DC4 as Detector Module Configure (DMCFG) under
+-- V4.1, 15-DEC-22: Fix message handler bug. First attempt at production code.
+
+-- V4.2, 25-DEC-22: Reassign DC4 as Detector Module Configure (DMCFG) under
 -- control of the CPU, for use in conjunction with Detector Module Read
 -- Control (DMRC) to let the detector modules figure out their own location
--- in the daisy chain.
+-- in the daisy chain. Fix bug whereby CPU was reading out the input of the
+-- detector module buffer instead of the output. 
+
 
 -- Global constants and types.  
 library ieee;  
@@ -360,7 +365,8 @@ begin
 	-- The Low-Level reset we handle directly from the Controller's CPU using
 	-- DMRST_BY_CPU, which we use to drive DMRST_pin HI. The high-level reset
 	-- provoked by the Display Panel button we handle in the Reset Arbitrator.
-	Reset_Arbitrator : process (CK,SCK) is 	constant reset_len : integer := 63;
+	Reset_Arbitrator : process (CK,SCK) is
+	constant reset_len : integer := 63;
 	variable count, state, next_state : integer range 0 to reset_len;
 	variable initiate : boolean;
 	begin
@@ -637,17 +643,17 @@ begin
 -- not set, a message is ready to read.
 	DM_Buffer : entity FIFO40
 		port map (
-        Data => dmb_in,
-        WrClock => not SCK,
-        RdClock => not PCK,
-        WrEn => DMBWR,
-        RdEn => DMBRD,
-        Reset=> RESET,
-        RPReset => RESET,
-        Q => dmb_out,
-        Empty => DMBEMPTY,
-		Full => DMBFULL
-	);
+			Data => dmb_in,
+			WrClock => not SCK,
+			RdClock => not PCK,
+			WrEn => DMBWR,
+			RdEn => DMBRD,
+			Reset=> RESET,
+			RPReset => RESET,
+			Q => dmb_out,
+			Empty => DMBEMPTY,
+			Full => DMBFULL
+		);
 
 -- The Memory Manager maps eight-bit read and write access to Detector Module 
 -- daisy chain bus, and the registers of the relay interface, as well as the
@@ -1262,12 +1268,21 @@ begin
 	EGRN <= '1';
 	EYLW <= to_std_logic(ETH = '0');
 	
-	-- Test points. We have TP1..TP3 showing the microprocessor-controlled registers 
-	-- zero through two. We have TP4 showing us any changes in the upstream data bus.
-	TP1 <= tp_reg(0); -- A pulse during write to main message buffer.
-	TP2 <= tp_reg(1); -- A pulse during interrupt execution.
-	TP3 <= DMIBSY; -- A pulse while detector module interface is reading daisy chain.
+	
+	-- Test points. We try to keep their descriptions up to date, but check the
+	-- CPU code for the test point register implementation.
+	
+	-- A pulse during write to main message buffer.
+	TP1 <= tp_reg(0); 
+	
+	 -- A pulse during interrupt execution.
+	TP2 <= tp_reg(1);
+	
+	-- A pulse while detector module interface is reading daisy chain.
+	TP3 <= DMIBSY; 
+	
+	-- Shows changes in daisy chain data lines.
 	TP4 <= dub(0) xor dub(1) xor dub(2) 
 		xor dub(3) xor dub(4) xor dub(5) 
-		xor dub(6) xor dub(7); -- Shows changes in daisy chain data lines.
+		xor dub(6) xor dub(7); 
 end behavior;
