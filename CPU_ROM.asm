@@ -20,6 +20,7 @@ const test_point_addr 0x0E06 ; Test Point Register (Read/Write)
 const msg_write_addr 0x0E07 ; Message Write Data (Write)
 const dm_reset_addr 0x0E08 ; Detector Module Reset (Write)
 const dm_config_addr 0x0E09 ; Detector Module Configure (Write)
+const errors_addr 0x0E0A ; Error Flag Register (Read)
 const irq_tmr1_addr 0x0E0D ; The interrupt timer value (Read)
 const relay_djr_addr 0x0E0E ; Relay Device Job Register (Read)
 const relay_crhi_addr 0x0E0F ; Relay Command Register HI (Read)
@@ -77,25 +78,29 @@ const dp_opcode_sw 0x60
 const num_indicators 15
 const num_detectors 16
 
-; Daisy chain index to antenna input map. The constant index_0, for
-; example, contains the antenna input number connected to the first
-; detector module in the daisy chain.
-const index_0  13
-const index_1  11
-const index_2  9
-const index_3  6
-const index_4  4
-const index_5  3
-const index_6  2
-const index_7  1
+; Daisy chain index to antenna input map. The last detector module 
+; in the daisy chain gives itself index one. The first gives itself
+; index equal to the number of detector modules present in the chain.
+; For our TCB-16A, that's index sixteen for the first detector module.
+; Given the index provided by the detector module, we want to obtain 
+; the physical antenna input connector number corresponding to that
+; detector module. The constants below map index to antenna input.
+const index_1  16
+const index_2  15
+const index_3  14
+const index_4  12
+const index_5  10
+const index_6  7
+const index_7  8
 const index_8  5
-const index_9  8
-const index_10 7
-const index_11 10
-const index_12 12
-const index_13 14
-const index_14 15
-const index_15 16
+const index_9  1
+const index_10 2
+const index_11 4
+const index_12 3
+const index_13 6
+const index_14 9
+const index_15 11
+const index_16 13 
 
 ; Timinig Constants. RCK is 32.768 kHz, PCK is 20 MHz.
 const rck_per_ts 255 ; RCK periods per timestamp interrupt minus one
@@ -170,10 +175,11 @@ inc IX
 dec B
 jp nz,init_channel_select_loop
 
-; Set up the detector module index to antenna input mapping. 
+; Set up the detector module index to antenna input mapping. We are
+; writing an array of constants into memory so that we can use the
+; detector module index to look up the antenna input number. The lowest
+; detector module index is one, not zero, so we start by incrementing IX.
 ld IX,zero_index_antenna
-ld A,index_0
-ld (IX),A
 inc IX
 ld A,index_1
 ld (IX),A
@@ -219,6 +225,9 @@ ld (IX),A
 inc IX
 ld A,index_15
 ld (IX),A
+inc IX
+ld A,index_16
+ld (IX),A
 
 ; Clear the previous message, setting its ID to invalid_id and its other
 ; records to zero.
@@ -230,19 +239,19 @@ ld (msg_lo_prv),A
 ld (msg_pwr_prv),A
 ld (msg_an_prv),A
 
-; Flash the indicators. We set all the indicator counters to the flash_linger value
-; and so turn on the indicators for flash_linger timer interrupt periods. The flash
-; will start only after we enable interrupts.
+; Flash the indicators on the base board. We set all the indicator counters to the 
+; flash_linger value and so turn on the indicators for flash_linger timer interrupt 
+; periods. The flash will start only after we enable interrupts.
 ld IX,zero_channel_timer
 ld A,num_indicators
 push A
 pop B
 ld A,flash_linger
-flash_indicators:
+init_flash:
 inc IX
 ld (IX),A
 dec B
-jp nz,flash_indicators
+jp nz,init_flash
 
 ; Reset the clock.
 ld A,0x00
@@ -712,8 +721,9 @@ ld (clock_hi),A
 ; payload. We add "nop" instructions to give the message buffer
 ; writes time to complete. We need four clock cycles between
 ; writes to the message buffer. The "ld A,(nn)" instruction itself
-; takes four cycles, and is therefore sufficient. We add two zeros 
-; for the power and antenna number of the clock message.
+; takes four cycles, and is therefore sufficient. For the two-byte
+; payload of the timestamp message we transmit the communication
+; status register and the error flag register.
 store_clock:
 ld A,clock_id
 ld (msg_write_addr),A
@@ -724,14 +734,9 @@ ld (msg_write_addr),A
 ld A,(fv_addr)
 add A,receiver_type
 ld (msg_write_addr),A
-nop
-nop
-ld A,0
+ld A,(comm_status_addr)
 ld (msg_write_addr),A
-nop
-nop
-nop
-nop
+ld A,(errors_addr)
 ld (msg_write_addr),A
 
 ; Reset the timestamp interrupt.

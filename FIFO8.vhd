@@ -2,7 +2,7 @@
 -- Module  Version: 5.8
 --C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n FIFO8 -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type ebfifo -depth 32 -width 8 -rwidth 8 -pfu_fifo -no_enable -pe -1 -pf -1 
 
--- Fri Dec 09 07:55:05 2022
+-- Wed Jan 04 18:39:08 2023
 
 library IEEE;
 use IEEE.std_logic_1164.all;

@@ -39,6 +39,11 @@
 -- in the daisy chain. Fix bug whereby CPU was reading out the input of the
 -- detector module buffer instead of the output. 
 
+-- V4.2, 04-JAN-23: Swap UPLOAD and EMPTY in communication status register.
+-- Improve comments. Increase fifo_near_empty from 15 to 128. Adjust detector 
+-- module index map to match latest detector module firmware 2.4. Add status
+-- flags to timestamp message as payload.
+
 
 -- Global constants and types.  
 library ieee;  
@@ -128,10 +133,6 @@ architecture behavior of main is
 	signal BBCONFIG : boolean; -- Base Board Requesting Reconfiguration
 	signal DPCONFIG : boolean; -- Display Panel Requesting Reconfiguration
 	signal CONFIG : boolean; -- Reconfiguration Requested
-
--- Detector Modules
-	constant dm_buff_len : integer := 64;
-	signal dm_msg_count : integer range 0 to dm_buff_len-1;
 	
 -- Message Buffer
 	signal MWRS : boolean; -- Message Write Strobe
@@ -141,7 +142,7 @@ architecture behavior of main is
 	signal MRDACK : boolean; -- Message Read Acknowledge
 	signal mrd_data : std_logic_vector(7 downto 0); -- Message Read Data
 	signal fifo_byte_count : std_logic_vector(20 downto 0);
-	constant fifo_near_empty : integer := 15; 
+	constant fifo_near_empty : integer := 128; 
 
 -- CPU-Writeable Test Points
 	signal tp_reg : std_logic_vector(7 downto 0) := "00000000";
@@ -193,6 +194,7 @@ architecture behavior of main is
 	constant msg_write_addr : integer := 7; -- Message Write Data (Write)
 	constant dm_reset_addr : integer := 8; -- Detector Module Reset (Write)
 	constant dm_config_addr : integer := 9; -- Detector Module Configure (Write)
+	constant errors_addr : integer := 10; -- Error Flags (Read)
 	constant irq_tmr1_addr : integer := 13; -- Timer One value (Read)
 	constant relay_djr_addr : integer := 14; -- Relay Device Job Register (Read)
 	constant relay_crhi_addr : integer := 15; -- Relay Command Register HI (Read)
@@ -619,10 +621,9 @@ begin
 			Full => DPXFULL
 		);
 
--- The Serial Data In Buffer (SDI Buffer) is wher the Display
--- Panel Receiver writes bytes for the CPU to read out. The
--- CPU checks the DPREMPTY flag to see if a byte is waiting, 
--- then reads it out.
+-- The Serial Data In Buffer (SDI Buffer) is wher the Display Panel 
+-- Receiver writes bytes for the CPU to read out. The CPU checks the 
+-- DPREMPTY flag to see if a byte is waiting, then reads it out.
 	SDI_Buffer : entity FIFO8
 		port map (
 			Data => dp_in,
@@ -701,9 +702,12 @@ begin
 				when relay_rc2_addr => cpu_data_in <= cont_rc(23 downto 16);
 				when relay_rc1_addr => cpu_data_in <= cont_rc(15 downto 8);
 				when relay_rc0_addr => cpu_data_in <= cont_rc(7 downto 0);
+				when errors_addr =>
+					cpu_data_in <= (others => '0');
+					cpu_data_in(0) <= DMERR;
 				when comm_status_addr => 
-					cpu_data_in(0) <= to_std_logic(UPLOAD);
-					cpu_data_in(1) <= to_std_logic(EMPTY);
+					cpu_data_in(0) <= to_std_logic(EMPTY);
+					cpu_data_in(1) <= to_std_logic(UPLOAD);
 					cpu_data_in(2) <= ETH;
 					cpu_data_in(3) <= to_std_logic(CONFIG);
 					cpu_data_in(4) <= not DPREMPTY;
@@ -729,13 +733,12 @@ begin
 		-- turn causes an asynchronous reset of RST_BY_CPU. But the RESET pulse endures,
 		-- thanks to the state machine in the Reset Arbitrator. The Message Write Strobe
 		-- (MWRS) is set on a write to msg_write_addr, and mwr_data is written for the
-		-- use of the Message Buffer Controller. On the next falling edge of PCK, if 
-		-- MWRACK is asserted, we clear MWRS, unless the very next rising edge carries
-		-- another write to msg_write_addr, in which case this clear of MWRS will be
-		-- over-ridden. When we read from a register, we might also set a flag to indicate
-		-- the data has been read. When we read from dpid_addr in the control space, we
-		-- get the value of the display panel data, but we also assert DPIR to reset the
-		-- display panel receiver.
+		-- use of the Message Buffer Controller. We continue to assert MWRS until we 
+		-- see MRACK is asserted, at which point we clear MWRS on the falling edge of PCK.
+		-- If it so happens that MRACK becomes asserted just when we are once again writing
+		-- to msg_write_addr, the clearing of MWRS will fail, and the new byte will not be
+		-- written to the message buffer because the Message Buffer Controller needs MWRS
+		-- to be unasserted before it writes another byte.
 		if (RESET = '1') then 
 			irq_tmr1_max <= max_data_byte;
 			irq_tmr2_max <= max_data_byte;
@@ -955,7 +958,7 @@ begin
 					cont_data(2) <= to_std_logic(MRDS);
 					cont_data(3) <= to_std_logic(MWRS);
 					cont_data(4) <= to_std_logic(CPUIRQ);
-					cont_data(5) <= to_std_logic(dm_msg_count /= 0);
+					cont_data(5) <= tp_reg(5);
 					cont_data(6) <= tp_reg(6);
 					cont_data(7) <= tp_reg(7);
 				when cont_djr_addr => 
@@ -1108,9 +1111,9 @@ begin
 		end loop;
 	end process;
 	
-	-- The Display Panel Transmitter sends messages to the display panel
-	-- using SDO. When the SDO Buffer contains a byte, the transmitter 
-	-- reads the byte and transmits it at 1 Mbps. The SDO signal is usually
+	-- The Display Panel Transmitter reads message from the SDO Buffer 
+	-- and serializes them for tranmission over SDO to the Display Panel. 
+	-- Transmission takes place at 1 MBPS. The SDO signal is usually
 	-- LO, so we begin with 2 us of guaranteed LO for set-up, then a 1-us 
 	-- HI for a start bit, and the eight data bits, 1 us each. 
 	Display_Panel_Transmitter : process (SCK,RESET) is 
@@ -1161,10 +1164,8 @@ begin
 		end if;
 	end process;
 	
-	-- The Display Panel Receiver receivers eight-bit messages from the
-	-- display panel. When it receives a message, it asserts Display
-	-- Panel Received (DPRCV). When it sees Display Panel Input Read
-	-- (DPIR), it returns to its rest state. 
+	-- The Display Panel Receiver receives eight-bit messages from the
+	-- display panel and writes them into the SDI Buffer.
 	Display_Panel_Receiver : process (SCK,RESET) is
 	constant end_state : integer := 20;
 	variable state : integer range 0 to end_state;
