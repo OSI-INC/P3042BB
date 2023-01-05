@@ -4,7 +4,7 @@
   (keywordMap (keywordLevel 0))
   (status
     (written
-      (timestamp 2023 1 4 19 14 31)
+      (timestamp 2023 1 5 10 26 21)
       (program "SCUBA" (version "Diamond (64-bit) 3.12.1.454"))))
       (comment "C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n CPU_ROM -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type bram -wp 00 -rp 1100 -addr_width 11 -data_width 8 -num_rows 2048 -cascade -1 -memfile c:/kevan/a3042/p3042bb/cpu_rom.mem -memformat hex ")
   (library ORCLIB
@@ -275,9 +275,9 @@
             (property INITVAL_02
               (string "0x00EE5000000FC50012E50007E012E50208E0A0071408E0A20700A600A00B004181300101E0004250"))
             (property INITVAL_01
-              (string "0x0A8050605200A0002050010D0130B0130901306013030130401302013010130501308013070130A0"))
+              (string "0x0A8050605200A0002050010401306013080130B0130E0130D0130F013000130C013090130A013070"))
             (property INITVAL_00
-              (string "0x130C0130E0130F013000120310C021130010220101E021CAF003C5000CE50866E0960707C7202C01"))
+              (string "0x13050130301302013010120310C021130010220101E021CAF003C5000CE50866E0960707C7202C01"))
             (property CSDECODE_B
               (string "0b111"))
             (property CSDECODE_A
@@ -376,9 +376,9 @@
             (property INITVAL_02
               (string "0x000010020000010020010026102001002000201600200020100020002018000610B8130401000200"))
             (property INITVAL_01
-              (string "0x0200100010002010001F022010A2010A2010A2010A2010A2010A2010A2010A2010A2010A2010A201"))
+              (string "0x0200100010002010001F022010A2010A2010A2010A2010A2010A2010A2110A2010A2010A2010A201"))
             (property INITVAL_00
-              (string "0x0A2010A2010A2010A2110A001040060A2000201305E10002F1000100200100E00022000203000000"))
+              (string "0x0A2010A2010A2010A2010A001040060A2000201305E10002F1000100200100E00022000203000000"))
             (property CSDECODE_B
               (string "0b111"))
             (property CSDECODE_A

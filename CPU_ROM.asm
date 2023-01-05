@@ -85,22 +85,22 @@ const num_detectors 16
 ; Given the index provided by the detector module, we want to obtain 
 ; the physical antenna input connector number corresponding to that
 ; detector module. The constants below map index to antenna input.
-const index_1  16
-const index_2  15
-const index_3  14
-const index_4  12
-const index_5  10
-const index_6  7
-const index_7  8
-const index_8  5
-const index_9  1
-const index_10 2
-const index_11 4
-const index_12 3
-const index_13 6
-const index_14 9
-const index_15 11
-const index_16 13 
+const index_1  1 
+const index_2  2 
+const index_3  3 
+const index_4  5 
+const index_5  7 
+const index_6  10
+const index_7  9
+const index_8  12
+const index_9  16
+const index_10 15
+const index_11 13
+const index_12 14
+const index_13 11
+const index_14 8
+const index_15 6
+const index_16 4
 
 ; Timinig Constants. RCK is 32.768 kHz, PCK is 20 MHz.
 const rck_per_ts 255 ; RCK periods per timestamp interrupt minus one

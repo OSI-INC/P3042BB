@@ -39,7 +39,7 @@
 -- in the daisy chain. Fix bug whereby CPU was reading out the input of the
 -- detector module buffer instead of the output. 
 
--- V4.2, 04-JAN-23: Swap UPLOAD and EMPTY in communication status register.
+-- V4.3, 05-JAN-23: Swap UPLOAD and EMPTY in communication status register.
 -- Improve comments. Increase fifo_near_empty from 15 to 128. Adjust detector 
 -- module index map to match latest detector module firmware 2.4. Add status
 -- flags to timestamp message as payload.
