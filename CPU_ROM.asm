@@ -5,8 +5,8 @@
 ;                        CONSTANTS
 ; ------------------------------------------------------------
 
-; Receiver type code, to which we add the firmware version 
-; to generate the receiver version. 
+; Receiver type code, to which we add the firmware version encoded
+; in the VHDL file to generate the receiver version. 
 const receiver_type 120 ; For A3042 receivers.
 
 ; Control Register Addresses.

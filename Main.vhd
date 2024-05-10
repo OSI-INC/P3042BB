@@ -25,6 +25,7 @@
 -- Module Interface reads out the daisy chain and rejects invalide
 -- message before storing in the buffer. Message reading greatly 
 -- simplified in the CPU. Correct bug in implementation of channel
+-- simplified in the CPU. Correct bug in implementation of channel
 -- selection in CPU code. Main loop when eliminating duplicates
 -- takes 38-87 PCK cycles. Running with PCK at 20 MHz in the 7000HC 
 -- chip, that's 3 us, or in the 4000ZE chip, 6 us.
@@ -43,6 +44,11 @@
 -- Improve comments. Increase fifo_near_empty from 15 to 128. Adjust detector 
 -- module index map to match latest detector module firmware 2.4. Add status
 -- flags to timestamp message as payload.
+
+-- V5.1, 10-MAY-24: Add serial interface for Transmitting Feedthrough (A3042TF).
+-- Take over TP3 and TP4 for TX and RX. We build two state machines just like 
+-- those that communicate with the Display Panel (A3042DP).
+
 
 
 -- Global constants and types.  
@@ -86,13 +92,16 @@ entity main is
 		SDO : out std_logic; -- Serial Data Out (DC6)
 		DMCK : out std_logic; -- Demodulator Clock (DC7)
 		
-		TP1, TP2, TP3, TP4 : out std_logic -- Test Point Register
+		TX : out std_logic; -- Transmitting Feedthrough Transmit
+		RX_in : in std_logic; -- Transmitting Feedthrough Receive
+		
+		TP1, TP2 : out std_logic -- Test Point Register
 	);	
 
 -- Version numbers.
 	constant hardware_id : integer := 42;
 	constant hardware_version : integer := 1;
-	constant firmware_version : integer := 4;
+	constant firmware_version : integer := 5;
 
 -- Configuration of OSR8.
 	constant prog_addr_len : integer := 11;
@@ -220,6 +229,9 @@ architecture behavior of main is
 	constant dmb_lo_addr : integer := 50; -- Detector Module LO Data Byte (Read)
 	constant dmb_pwr_addr : integer := 51; -- Detector Module Power (Read)
 	constant dmb_an_addr : integer := 52; -- Detector Module Antenna Number (Read)
+	constant tfid_addr : integer := 53; -- Transmitting Feedthrough Input Data (Read)
+	constant tfodh_addr : integer := 54; -- Transmitting Feedthrough Output Data HI (Write)
+	constant tfodl_addr : integer := 55; -- Transmitting Feedthrough Output Data LO (Write)
 	
 	-- Relay Interface Registers.
 	signal cont_djr : std_logic_vector(7 downto 0); -- Device Job Register
@@ -260,6 +272,18 @@ architecture behavior of main is
 	signal DPREMPTY : std_logic; -- Display Panel Receiver Buffer Empty
 	signal DPRFULL : std_logic; -- Display Panel Receiver Buffer Full
 	signal dp_in, dp_in_waiting, dp_out: std_logic_vector(7 downto 0);
+	
+-- Transmitting Feedthrough Interface;
+	signal TFXWR : std_logic; -- Transmitting Feedthrough Transmit Write
+	signal TFXRD : std_logic; -- Transmitting Feedthrough Transmit Read
+	signal TFXEMPTY : std_logic; -- Transmitting Feedthrough Transmit Buffer Empty
+	signal TFXFULL : std_logic; -- Transmitting Feedthrough Transmit Buffer Full
+	signal TFRWR : std_logic; -- Transmitting Feedthrough Receiver Write
+	signal TFRRD : std_logic; -- Transmitting Feedthrough Receiver Read
+	signal TFREMPTY : std_logic; -- Transmitting Feedthrough Receiver Buffer Empty
+	signal TFRFULL : std_logic; -- Transmitting Feedthrough Receiver Buffer Full
+	signal tf_out : std_logic_vector(15 downto 0);
+	signal tf_out_h, tf_in, tf_in_waiting : std_logic_vector(7 downto 0);
 	
 -- Detector Module Buffer Interface
 	signal DMBWR : std_logic; -- Detector Module Buffer Write
@@ -359,11 +383,12 @@ begin
 	
 	-- The Reset Arbitrator manages the three levels of reset. The Top-Level 
 	-- Reset is when we press either the base board reset switch or the display 
-	-- panel reset switch. The Relay, Controller, Detector Modules and Display 
-	-- Panel all reset. The hardware reset monitor, U5, generates a 100-ms
-	-- LO on !RESET. A Mid-Level Reset is one in which the Relay remains active, 
-	-- but the Controller, Detector Modules, and Display Panel reset. A Low-Level 
-	-- Reset is one in which only the Detector Modules and Display Panel reset. 
+	-- panel reset switch. The Relay, Controller, Detector Modules, Transmitting
+	-- Feedthrough and Display Panel all reset. The hardware reset monitor, U5, 
+	-- generates a 100-ms LO on !RESET. A Mid-Level Reset is one in which the 
+	-- Relay remains active, but the Controller, Detector Modules, Transmitting 
+	-- Feedthrough and Display Panel all reset. A Low-Level Reset is one in which 
+	-- only the Detector Modules, Transmitting Feedthrough, and Display Panel reset. 
 	-- The Low-Level reset we handle directly from the Controller's CPU using
 	-- DMRST_BY_CPU, which we use to drive DMRST_pin HI. The high-level reset
 	-- provoked by the Display Panel button we handle in the Reset Arbitrator.
@@ -604,10 +629,10 @@ begin
 			CK => PCK
 		);
 		
--- The Serial Data Out Buffer (SDO Buffer) buffer is where the CPU writes 
--- bytes it wants the Display Panel Transmitter to serialize for the
--- Display panel.
-	SDO_Buffer : entity FIFO8
+-- The Display Panel Output Buffer (DPO Buffer) buffer is where the 
+-- CPU writes bytes it wants the Display Panel Transmitter to serialize 
+-- for the Display Panel.
+	DPO_Buffer : entity FIFO8
 		port map (
 			Data => cpu_data_out,
 			WrClock => not PCK,
@@ -621,10 +646,10 @@ begin
 			Full => DPXFULL
 		);
 
--- The Serial Data In Buffer (SDI Buffer) is wher the Display Panel 
--- Receiver writes bytes for the CPU to read out. The CPU checks the 
--- DPREMPTY flag to see if a byte is waiting, then reads it out.
-	SDI_Buffer : entity FIFO8
+-- The Display Panel Input Buffer (DPI Buffer) is where the Display 
+-- Panel Receiver writes bytes for the CPU to read out. The CPU checks 
+-- the DPREMPTY flag to see if a byte is waiting, then reads it out.
+	DPI_Buffer : entity FIFO8
 		port map (
 			Data => dp_in,
 			WrClock => not SCK,
@@ -637,6 +662,42 @@ begin
 			Empty => DPREMPTY,
 			Full => DPRFULL
 		);
+		
+-- The Transmitting Feedthrough Output Buffer (TFO Buffer) buffer is 
+-- where the CPU writes sixteen-bit words it wants the Transmitting-- Feedthrough Transmitter to serialize.
+	TFO_Buffer : entity FIFO16
+		port map (
+			Data(7 downto 0) => cpu_data_out,
+			Data(15 downto 8) => tf_out_h,
+			WrClock => not PCK,
+			RDClock => not SCK,
+			WrEn => TFXWR,
+			RdEn => TFXRD,
+			Reset => RESET,
+			RPReset => RESET,
+			Q => tf_out,
+			Empty => TFXEMPTY,
+			Full => TFXFULL
+		);
+
+-- The Transmitting Feedthrough Input Buffer (TFI Buffer) is where the 
+-- Transmitting Feedthrough Receiver writes bytes for the CPU to read-- out. The CPU checks the TFREMPTY flag to see if a byte is waiting, then
+-- reads it out.
+	TFI_Buffer : entity FIFO8
+		port map (
+			Data => tf_in,
+			WrClock => not SCK,
+			RDClock => not PCK,
+			WrEn => TFRWR,
+			RdEn => TFRRD,
+			Reset => RESET,
+			RPReset => RESET,
+			Q => tf_in_waiting,
+			Empty => TFREMPTY,
+			Full => TFRFULL
+		);
+
+
 
 -- The Detector Module Buffer is where the Detector Module Reader puts
 -- messages for the CPU to read out and subsequently write into the
@@ -716,6 +777,8 @@ begin
 					cpu_data_in(7) <= MRDY;
 				when dpid_addr => 
 					cpu_data_in <= dp_in_waiting;
+				when tfid_addr =>
+					cpu_data_in <= tf_in_waiting;
 				when dmb_id_addr => cpu_data_in <= dmb_out(39 downto 32);
 				when dmb_hi_addr => cpu_data_in <= dmb_out(31 downto 24);
 				when dmb_lo_addr => cpu_data_in <= dmb_out(23 downto 16);
@@ -751,6 +814,8 @@ begin
 			DMRST_BY_CPU <= true;
 			DPXWR <= '0';
 			DPRRD <= '0';
+			TFXWR <= '0';
+			TFRRD <= '0';
 			DMBRD <= '0';
 			DPCONFIG <= false;
 			DMCFG <= '0';
@@ -761,6 +826,8 @@ begin
 			DJRRST <= false;
 			DPXWR <= '0';
 			DPRRD <= '0';
+			TFXWR <= '0';
+			TFRRD <= '0';
 			DMBRD <= '0';
 			if MWRACK then MWRS <= false; end if;
 			if CPUDS then 
@@ -786,6 +853,8 @@ begin
 								indicator_control(to_integer(unsigned(cpu_addr(3 downto 0)))) 
 									<= cpu_data_out(0);
 							when dpod_addr => if (DPXFULL = '0') then DPXWR <= '1'; end if;
+							when tfodh_addr => tf_out_h <= cpu_data_out;
+							when tfodl_addr => if (TFXFULL = '0') then TFXWR <= '1'; end if;
 							when dmb_read_addr => DMBRD <= '1';
 						end case;
 					end if;
@@ -1080,12 +1149,13 @@ begin
 			state := next_state;
 		end if;
 	end process;
-		
+	
 	-- The Lamp Inhibitor looks at the HIDE switch and turns on or off
 	-- the front edge flashing lamps and the detector module lamps. It
 	-- does not reset with the RESET signal, but only on power-up. The
 	-- HIDE and SHOW buttons work so long as RCK is running and we have
-	-- power. No malfunction of the CPU program can stop them.
+	-- power. No malfunction of the CPU program can stop them. No failure
+	-- of the logic chip's PLL or of the CK oscillator will stop them.
 	Lamp_Inhibitor : process (RCK_in,RESET) is
 	constant wait_count : integer := 4095;
 	variable debounce_state : integer range 0 to wait_count := 0;
@@ -1111,12 +1181,12 @@ begin
 		end loop;
 	end process;
 	
-	-- The Display Panel Transmitter reads message from the SDO Buffer 
+	-- The Display Panel Transmitter reads message sfrom the SDO Buffer 
 	-- and serializes them for tranmission over SDO to the Display Panel. 
 	-- Transmission takes place at 1 MBPS. The SDO signal is usually
 	-- LO, so we begin with 2 us of guaranteed LO for set-up, then a 1-us 
 	-- HI for a start bit, and the eight data bits, 1 us each. 
-	Display_Panel_Transmitter : process (SCK,RESET) is 
+	DP_Transmitter : process (SCK,RESET) is 
 	constant end_state : integer := 31;
 	variable state : integer range 0 to end_state;
 	begin
@@ -1166,7 +1236,7 @@ begin
 	
 	-- The Display Panel Receiver receives eight-bit messages from the
 	-- display panel and writes them into the SDI Buffer.
-	Display_Panel_Receiver : process (SCK,RESET) is
+	DP_Receiver : process (SCK,RESET) is
 	constant end_state : integer := 20;
 	variable state : integer range 0 to end_state;
 	variable RSDI, FSDI : std_logic;
@@ -1221,6 +1291,117 @@ begin
 		end if;
 	end process;
 	
+	-- The Transmitting Feedthrough Transmitter transmits sixteen bit 
+	-- serial messages to the Transmitting Feedthrough, should it exist,
+	-- using the TX output. Transmission takes place at 1 MBPS. The TX 
+	-- signal is usually LO, so we begin with 2 us of guaranteed LO for 
+	-- set-up, then a 1-us HI for a start bit, and the eight data bits, 
+	-- 1 us each.
+	TF_Transmitter : process (SCK,RESET) is 
+	constant end_state : integer := 31;
+	variable state : integer range 0 to end_state;
+	begin
+		if (RESET = '1') then
+			state := 0;
+		elsif rising_edge(SCK) then
+			case state is
+				when 4 => TX <= '1';
+				when 5 => TX <= '1';
+				when 6 => TX <= tf_out(7);
+				when 7 => TX <= tf_out(7);
+				when 8 => TX <= tf_out(6);
+				when 9 => TX <= tf_out(6);
+				when 10 => TX <= tf_out(5);
+				when 11 => TX <= tf_out(5);
+				when 12 => TX <= tf_out(4);
+				when 13 => TX <= tf_out(4);
+				when 14 => TX <= tf_out(3);
+				when 15 => TX <= tf_out(3);
+				when 16 => TX <= tf_out(2);
+				when 17 => TX <= tf_out(2);
+				when 18 => TX <= tf_out(1);
+				when 19 => TX <= tf_out(1);
+				when 20 => TX <= tf_out(0);
+				when 21 => TX <= tf_out(0);
+				when others => TX <= '0';
+			end case;
+			
+			TFXRD <= '0';
+			case state is
+				when 0 => 
+					if (TFXEMPTY = '0') then 
+						state := 1; 
+					else 
+						state := 0;
+					end if;
+				when 1 => 
+					TFXRD <= '1';
+					state := 2;
+				when end_state =>
+					state := 0;
+				when others =>
+					state := state + 1;
+			end case;
+		end if;
+	end process;
+	
+	-- The Transmitting Feedthrough Receiver receives eight-bit messages 
+	-- from the Transmitting Feedthrough and writes them into the RX Buffer.
+	TF_Receiver : process (SCK,RESET) is
+	constant end_state : integer := 20;
+	variable state : integer range 0 to end_state;
+	variable RRX, FRX : std_logic;
+	begin
+		if falling_edge(SCK) then
+			FRX := RX_in;
+		end if;
+		if rising_edge(SCK) then
+			RRX := RX_in;
+		end if;
+		
+		if (RESET = '1') then
+			state := 0;
+			tf_in <= (others => '0');
+		elsif rising_edge(SCK) then
+		
+			case state is
+				when 1 =>
+					tf_in <= (others => '0');
+				when 4 | 6 | 8 | 10 | 12 | 14 | 16 | 18 => 
+					tf_in(7 downto 1) <= tf_in(6 downto 0);
+					tf_in(0) <= FRX; 
+				when others => tf_in <= tf_in;
+			end case;
+			
+			TFRWR <= '0';
+			case state is 
+				when 0 => 
+					if (RRX = '0') and (DPRFULL = '0') then
+						state := 1;
+					else 
+						state := 0;
+					end if;
+				when 1 =>
+					if (RRX = '0') then
+						state := 2;
+					else 
+						state := 0;
+					end if;
+				when 2 =>
+					if (RRX = '1') then 
+						state := 3; 
+					else
+						state := 2;
+					end if;
+				when end_state =>
+					TFRWR <= '1';
+					state := 0;
+				when others =>
+					state := state + 1;
+			end case;
+		end if;
+	end process;		
+
 	-- The UPLOAD flag is set when the Relay is reading from the message buffer.
 	-- The EMPTY flag is set when the Message Buffer is nearly empty.
 	Fifo_Indicators : process (CK,RESET) is
@@ -1269,21 +1450,20 @@ begin
 	EGRN <= '1';
 	EYLW <= to_std_logic(ETH = '0');
 	
-	
 	-- Test points. We try to keep their descriptions up to date, but check the
-	-- CPU code for the test point register implementation.
+	-- CPU code for the test point register implementation. We have alternate 
+	-- uses of the test points defined in the comments.
 	
 	-- A pulse during write to main message buffer.
 	TP1 <= tp_reg(0); 
+	
+	-- Shows changes in daisy chain data lines.
+	-- TP1 <= dub(0) xor dub(1) xor dub(2) xor dub(3) 
+	--	xor dub(4) xor dub(5) xor dub(6) xor dub(7); 
 	
 	 -- A pulse during interrupt execution.
 	TP2 <= tp_reg(1);
 	
 	-- A pulse while detector module interface is reading daisy chain.
-	TP3 <= DMIBSY; 
-	
-	-- Shows changes in daisy chain data lines.
-	TP4 <= dub(0) xor dub(1) xor dub(2) 
-		xor dub(3) xor dub(4) xor dub(5) 
-		xor dub(6) xor dub(7); 
+	-- TP2 <= DMIBSY; 
 end behavior;
