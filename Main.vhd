@@ -45,8 +45,8 @@
 -- module index map to match latest detector module firmware 2.4. Add status
 -- flags to timestamp message as payload.
 
--- V5.1, 10-MAY-24: Add serial interface for Transmitting Feedthrough (A3042TF).
--- Take over TP3 and TP4 for TX and RX. Outgoing data is twenty-four bit words-- that the CPU writes into a buffer for transmission. Incoming data is eight bits 
+-- V5.1, 12-MAY-24: Add serial interface for Transmitting Feedthrough (A3042TF).
+-- Take over TP3 and TP4 for TX and RX. Outgoing data is sixteen-bit words-- that the CPU writes into a buffer for transmission. Incoming data is eight bits 
 -- updated each time an eight-bit transmission is received from the feedthrough.
 -- Remove unused thirty-two bit repeat counter.
 
@@ -226,10 +226,9 @@ architecture behavior of main is
 	constant dmb_lo_addr : integer := 50; -- Detector Module LO Data Byte (Read)
 	constant dmb_pwr_addr : integer := 51; -- Detector Module Power (Read)
 	constant dmb_an_addr : integer := 52; -- Detector Module Antenna Number (Read)
-	constant tfid_addr : integer := 53; -- Transmitting Feedthrough Input Data (Read)
-	constant tfodh_addr : integer := 54; -- Transmitting Feedthrough Output Data HI (Write)
-	constant tfodm_addr : integer := 55; -- Transmitting Feedthrough Output Data MID (Write)
-	constant tfodl_addr : integer := 56; -- Transmitting Feedthrough Output Data LO (Write)
+	constant tf_sr_addr : integer := 53; -- Transmitting Feedthrough Status Register (Read)
+	constant tf_op_addr : integer := 54; -- Transmitting Feedthrough Opcode (Write)
+	constant tf_n_addr : integer := 55; -- Transmitting Feedthrough Operand (Write)
 	
 	-- Relay Interface Registers.
 	signal cont_djr : std_logic_vector(7 downto 0); -- Device Job Register
@@ -271,8 +270,8 @@ architecture behavior of main is
 	signal TFXRD : std_logic; -- Transmitting Feedthrough Transmit Read
 	signal TFXEMPTY : std_logic; -- Transmitting Feedthrough Transmit Buffer Empty
 	signal TFXFULL : std_logic; -- Transmitting Feedthrough Transmit Buffer Full
-	signal tf_out : std_logic_vector(23 downto 0);
-	signal tf_out_h, tf_out_m, tf_in, tf_in_sr : std_logic_vector(7 downto 0);
+	signal tf_out_opcode, tf_in, tf_in_sr : std_logic_vector(7 downto 0);
+	signal tf_out : std_logic_vector(15 downto 0);
 	
 -- Detector Module Buffer Interface
 	signal DMBWR : std_logic; -- Detector Module Buffer Write
@@ -653,11 +652,11 @@ begin
 		);
 		
 -- The Transmitting Feedthrough Output Buffer (TFO Buffer) buffer is 
--- where the CPU writes twenty-four-bit words it wants the Transmitting-- Feedthrough Transmitter to serialize.
-	TFO_Buffer : entity FIFO24
+-- where the CPU writes sixteen-bit words it wants the Transmitting-- Feedthrough Transmitter to serialize. The top eight bits are an
+-- operation code, the bottom eight bits are an operand.
+	TFO_Buffer : entity FIFO16
 		port map (
-			Data(23 downto 16) => tf_out_h,
-			Data(15 downto 8) => tf_out_m,
+			Data(15 downto 8) => tf_out_opcode,
 			Data(7 downto 0) => cpu_data_out,
 			WrClock => not PCK,
 			RDClock => not SCK,
@@ -743,8 +742,7 @@ begin
 					cpu_data_in(7) <= MRDY;
 				when dpid_addr => 
 					cpu_data_in <= dp_in_waiting;
-				when tfid_addr =>
-					cpu_data_in <= tf_in;
+				when tf_sr_addr => cpu_data_in <= tf_in;
 				when dmb_id_addr => cpu_data_in <= dmb_out(39 downto 32);
 				when dmb_hi_addr => cpu_data_in <= dmb_out(31 downto 24);
 				when dmb_lo_addr => cpu_data_in <= dmb_out(23 downto 16);
@@ -817,9 +815,8 @@ begin
 								indicator_control(to_integer(unsigned(cpu_addr(3 downto 0)))) 
 									<= cpu_data_out(0);
 							when dpod_addr => if (DPXFULL = '0') then DPXWR <= '1'; end if;
-							when tfodh_addr => tf_out_h <= cpu_data_out;
-							when tfodm_addr => tf_out_m <= cpu_data_out;
-							when tfodl_addr => if (TFXFULL = '0') then TFXWR <= '1'; end if;
+							when tf_op_addr => tf_out_opcode <= cpu_data_out;
+							when tf_n_addr => if (TFXFULL = '0') then TFXWR <= '1'; end if;
 							when dmb_read_addr => DMBRD <= '1';
 						end case;
 					end if;
@@ -1265,22 +1262,38 @@ begin
 			case state is
 				when 4 => TX <= '1';
 				when 5 => TX <= '1';
-				when 6 => TX <= tf_out(7);
-				when 7 => TX <= tf_out(7);
-				when 8 => TX <= tf_out(6);
-				when 9 => TX <= tf_out(6);
-				when 10 => TX <= tf_out(5);
-				when 11 => TX <= tf_out(5);
-				when 12 => TX <= tf_out(4);
-				when 13 => TX <= tf_out(4);
-				when 14 => TX <= tf_out(3);
-				when 15 => TX <= tf_out(3);
-				when 16 => TX <= tf_out(2);
-				when 17 => TX <= tf_out(2);
-				when 18 => TX <= tf_out(1);
-				when 19 => TX <= tf_out(1);
-				when 20 => TX <= tf_out(0);
-				when 21 => TX <= tf_out(0);
+				when 6 => TX <= tf_out(15);
+				when 7 => TX <= tf_out(15);
+				when 8 => TX <= tf_out(14);
+				when 9 => TX <= tf_out(14);
+				when 10 => TX <= tf_out(13);
+				when 11 => TX <= tf_out(13);
+				when 12 => TX <= tf_out(12);
+				when 13 => TX <= tf_out(12);
+				when 14 => TX <= tf_out(11);
+				when 15 => TX <= tf_out(11);
+				when 16 => TX <= tf_out(10);
+				when 17 => TX <= tf_out(10);
+				when 18 => TX <= tf_out(9);
+				when 19 => TX <= tf_out(9);
+				when 20 => TX <= tf_out(8);
+				when 21 => TX <= tf_out(8);
+				when 22 => TX <= tf_out(7);
+				when 23 => TX <= tf_out(7);
+				when 24 => TX <= tf_out(6);
+				when 25 => TX <= tf_out(6);
+				when 26 => TX <= tf_out(5);
+				when 27 => TX <= tf_out(5);
+				when 28 => TX <= tf_out(4);
+				when 29 => TX <= tf_out(4);
+				when 30 => TX <= tf_out(3);
+				when 31 => TX <= tf_out(3);
+				when 32 => TX <= tf_out(2);
+				when 33 => TX <= tf_out(2);
+				when 34 => TX <= tf_out(1);
+				when 35 => TX <= tf_out(1);
+				when 36 => TX <= tf_out(0);
+				when 37 => TX <= tf_out(0);
 				when others => TX <= '0';
 			end case;
 			
@@ -1295,7 +1308,7 @@ begin
 				when 1 => 
 					TFXRD <= '1';
 					state := 2;
-				when 31 =>
+				when 45 =>
 					state := 0;
 				when others =>
 					state := state + 1;

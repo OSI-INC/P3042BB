@@ -40,10 +40,9 @@ const dmb_hi_addr 0x0E31 ; Detector Module HI Data Byte (Read)
 const dmb_lo_addr 0x0E32 ; Detector Module LO Data Byte (Read)
 const dmb_pwr_addr 0x0E33 ; Detector Module Power (Read)
 const dmb_an_addr 0x0E34 ; Detector Module Antenna Number (Read)
-const tfid_addr 0x0E35 ; Transmitting Feedthrough Input Data (Read)
-const tfodh_addr 0x0E36 ; Transmitting Feedthrough Output Data HI (Write)
-const tfodm_addr 0x0E37 ; Transmitting Feedthrough Output Data MID (Write)
-const tfodl_addr 0x0E38 ; Transmitting Feedthrough Output Data LO (Write)
+const tf_sr_addr 0x0E35 ; Transmitting Feedthrough Status Register (Read)
+const tf_op_addr 0x0E36 ; Transmitting Feedthrough Opcode (Write)
+const tf_n_addr 0x0E37 ; Transmitting Feedthrough Operand (Write)
 
 ; Controller job numbers.
 const read_job 3
