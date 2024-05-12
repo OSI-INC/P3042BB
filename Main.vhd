@@ -690,8 +690,7 @@ begin
 
 -- The Memory Manager maps eight-bit read and write access to Detector Module 
 -- daisy chain bus, and the registers of the relay interface, as well as the
--- Random Access Memory, and Interrupt Handler. Byte ordering is big-endian 
--- (most significant byte at lower address). 
+-- Random Access Memory, and Interrupt Handler. Byte ordering is big-endian. 
 	MMU : process (PCK,RESET) is
 		variable top_bits : integer range 0 to 7;
 		variable bottom_bits : integer range 0 to 127;
@@ -724,8 +723,8 @@ begin
 				when irq_tmr1_addr => cpu_data_in <= irq_tmr1;
 				when irq_tmr2_max_addr => cpu_data_in <= irq_tmr2_max;
 				when irq_tmr2_addr => cpu_data_in <= irq_tmr2;
-				when fv_addr => cpu_data_in <= std_logic_vector(
-					to_unsigned(firmware_version,8));
+				when fv_addr => cpu_data_in <= 
+					std_logic_vector(to_unsigned(firmware_version,8));
 				when test_point_addr => cpu_data_in <= tp_reg;
 				when relay_djr_addr => cpu_data_in <= cont_djr;
 				when relay_crhi_addr => cpu_data_in <= cont_cr(15 downto 8);
@@ -1041,7 +1040,7 @@ begin
 	-- is no longer full. The interface sets a flag DMIBSY when it is not in
 	-- its rest state. This flag is available to the CPU in the communications
 	-- status register. Whe the interface sees Detector Module Configure
-	-- (DMCFG) asserted, it starts a configuration acces, asserting DMRC
+	-- (DMCFG) asserted, it starts a configuration access, asserting DMRC
 	-- until DMCFG is unasserted. While both DMCFG and DMRC are asserted,
 	-- the detector modules calculate their position in the daisy chain.
 	Detector_Module_Interface : process (SCK,RESET) is
