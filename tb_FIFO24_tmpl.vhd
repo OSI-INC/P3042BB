@@ -13,30 +13,30 @@ end entity tb;
 
 architecture test of tb is 
 
-    component FIFO5x128
-        port (Data : in std_logic_vector(39 downto 0); 
+    component FIFO24
+        port (Data : in std_logic_vector(23 downto 0); 
         WrClock: in std_logic; RdClock: in std_logic; WrEn: in std_logic; 
         RdEn: in std_logic; Reset: in std_logic; RPReset: in std_logic; 
-        Q : out std_logic_vector(39 downto 0); Empty: out std_logic; 
+        Q : out std_logic_vector(23 downto 0); Empty: out std_logic; 
         Full: out std_logic; AlmostEmpty: out std_logic; 
         AlmostFull: out std_logic
     );
     end component;
 
-    signal Data : std_logic_vector(39 downto 0) := (others => '0');
+    signal Data : std_logic_vector(23 downto 0) := (others => '0');
     signal WrClock: std_logic := '0';
     signal RdClock: std_logic := '0';
     signal WrEn: std_logic := '0';
     signal RdEn: std_logic := '0';
     signal Reset: std_logic := '0';
     signal RPReset: std_logic := '0';
-    signal Q : std_logic_vector(39 downto 0);
+    signal Q : std_logic_vector(23 downto 0);
     signal Empty: std_logic;
     signal Full: std_logic;
     signal AlmostEmpty: std_logic;
     signal AlmostFull: std_logic;
 begin
-    u1 : FIFO5x128
+    u1 : FIFO24
         port map (Data => Data, WrClock => WrClock, RdClock => RdClock, 
             WrEn => WrEn, RdEn => RdEn, Reset => Reset, RPReset => RPReset, 
             Q => Q, Empty => Empty, Full => Full, AlmostEmpty => AlmostEmpty, 
@@ -49,7 +49,7 @@ begin
       Data <= (others => '0') ;
       wait for 100 ns;
       wait until Reset = '0';
-      for i in 0 to 131 loop
+      for i in 0 to 259 loop
         wait until WrClock'event and WrClock = '1';
         Data <= Data + '1' after 1 ns;
       end loop;
@@ -66,7 +66,7 @@ begin
       WrEn <= '0' ;
       wait for 100 ns;
       wait until Reset = '0';
-      for i in 0 to 131 loop
+      for i in 0 to 259 loop
         wait until WrClock'event and WrClock = '1';
         WrEn <= '1' after 1 ns;
       end loop;
@@ -81,7 +81,7 @@ begin
       wait until Reset = '0';
       wait until WrEn = '1';
       wait until WrEn = '0';
-      for i in 0 to 131 loop
+      for i in 0 to 259 loop
         wait until RdClock'event and RdClock = '1';
         RdEn <= '1' after 1 ns;
       end loop;

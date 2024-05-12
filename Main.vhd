@@ -46,8 +46,9 @@
 -- flags to timestamp message as payload.
 
 -- V5.1, 10-MAY-24: Add serial interface for Transmitting Feedthrough (A3042TF).
--- Take over TP3 and TP4 for TX and RX. We build two state machines just like 
--- those that communicate with the Display Panel (A3042DP).
+-- Take over TP3 and TP4 for TX and RX. Outgoing data is twenty-four bit words-- that the CPU writes into a buffer for transmission. Incoming data is eight bits 
+-- updated each time an eight-bit transmission is received from the feedthrough.
+-- Remove unused thirty-two bit repeat counter.
 
 
 
@@ -209,10 +210,6 @@ architecture behavior of main is
 	constant relay_crhi_addr : integer := 15; -- Relay Command Register HI (Read)
 	constant relay_crlo_addr : integer := 16; -- Relay Command Register LO (Read)
 	constant relay_djr_rst_addr : integer := 17; -- Reset Relay Device Job Register (Write)
-	constant relay_rc3_addr : integer := 18; -- Repeat Counter Byte 3 (Read)
-	constant relay_rc2_addr : integer := 19; -- Repeat Counter Byte 2 (Read)
-	constant relay_rc1_addr : integer := 20; -- Repeat Counter Byte 1 (Read)
-	constant relay_rc0_addr : integer := 21; -- Repeat Counter Byte 0 (Read)
 	constant comm_status_addr: integer := 22; -- Communication Status Register (Read)
 	constant dpcr_addr : integer := 23; -- Display Panel Configuration Request (Write)
 	constant dpod_addr : integer := 24; -- Display Panel Output Data (Write)
@@ -231,12 +228,12 @@ architecture behavior of main is
 	constant dmb_an_addr : integer := 52; -- Detector Module Antenna Number (Read)
 	constant tfid_addr : integer := 53; -- Transmitting Feedthrough Input Data (Read)
 	constant tfodh_addr : integer := 54; -- Transmitting Feedthrough Output Data HI (Write)
-	constant tfodl_addr : integer := 55; -- Transmitting Feedthrough Output Data LO (Write)
+	constant tfodm_addr : integer := 55; -- Transmitting Feedthrough Output Data MID (Write)
+	constant tfodl_addr : integer := 56; -- Transmitting Feedthrough Output Data LO (Write)
 	
 	-- Relay Interface Registers.
 	signal cont_djr : std_logic_vector(7 downto 0); -- Device Job Register
 	signal cont_cr : std_logic_vector(15 downto 0); -- Command Register
-	signal cont_rc : std_logic_vector(31 downto 0); -- Repeat Counter
 	
 	-- Relay Interface Memory Map Constants with Read and Write as seen by the
 	-- LWDAQ Relay that is master of the interface. We respect the existing
@@ -246,12 +243,8 @@ architecture behavior of main is
 	constant cont_djr_addr : integer := 3; -- Device Job Register (Read/Write)
 	constant cont_hv_addr : integer := 18; -- Hardware Version (Read)
 	constant cont_fv_addr : integer := 19; -- Firmware Version (Read)
-	constant cont_crhi_addr : integer := 32; -- Command Ragister HI (Write)
-	constant cont_crlo_addr : integer := 33; -- Command Ragister LO (Write)
-	constant cont_rc3_addr : integer := 34; -- Repeat Counter Byte 3 (Write)
-	constant cont_rc2_addr : integer := 35; -- Repeat Counter Byte 2 (Write)
-	constant cont_rc1_addr : integer := 36; -- Repeat Counter Byte 1 (Write)
-	constant cont_rc0_addr : integer := 37; -- Repeat Counter Byte 0 (Write)
+	constant cont_crhi_addr : integer := 32; -- Command Register HI (Write)
+	constant cont_crlo_addr : integer := 33; -- Command Register LO (Write)
 	constant cont_cfsw_addr : integer := 40; -- Configuration Switch (Read)
 	constant cont_srst_addr : integer := 41; -- Software Reset of Controller (Write)
 	constant cont_fifo_av_addr : integer := 61; -- Fifo Blocks Available (Read)
@@ -278,12 +271,8 @@ architecture behavior of main is
 	signal TFXRD : std_logic; -- Transmitting Feedthrough Transmit Read
 	signal TFXEMPTY : std_logic; -- Transmitting Feedthrough Transmit Buffer Empty
 	signal TFXFULL : std_logic; -- Transmitting Feedthrough Transmit Buffer Full
-	signal TFRWR : std_logic; -- Transmitting Feedthrough Receiver Write
-	signal TFRRD : std_logic; -- Transmitting Feedthrough Receiver Read
-	signal TFREMPTY : std_logic; -- Transmitting Feedthrough Receiver Buffer Empty
-	signal TFRFULL : std_logic; -- Transmitting Feedthrough Receiver Buffer Full
-	signal tf_out : std_logic_vector(15 downto 0);
-	signal tf_out_h, tf_in, tf_in_waiting : std_logic_vector(7 downto 0);
+	signal tf_out : std_logic_vector(23 downto 0);
+	signal tf_out_h, tf_out_m, tf_in, tf_in_sr : std_logic_vector(7 downto 0);
 	
 -- Detector Module Buffer Interface
 	signal DMBWR : std_logic; -- Detector Module Buffer Write
@@ -664,11 +653,12 @@ begin
 		);
 		
 -- The Transmitting Feedthrough Output Buffer (TFO Buffer) buffer is 
--- where the CPU writes sixteen-bit words it wants the Transmitting-- Feedthrough Transmitter to serialize.
-	TFO_Buffer : entity FIFO16
+-- where the CPU writes twenty-four-bit words it wants the Transmitting-- Feedthrough Transmitter to serialize.
+	TFO_Buffer : entity FIFO24
 		port map (
+			Data(23 downto 16) => tf_out_h,
+			Data(15 downto 8) => tf_out_m,
 			Data(7 downto 0) => cpu_data_out,
-			Data(15 downto 8) => tf_out_h,
 			WrClock => not PCK,
 			RDClock => not SCK,
 			WrEn => TFXWR,
@@ -679,25 +669,6 @@ begin
 			Empty => TFXEMPTY,
 			Full => TFXFULL
 		);
-
--- The Transmitting Feedthrough Input Buffer (TFI Buffer) is where the 
--- Transmitting Feedthrough Receiver writes bytes for the CPU to read-- out. The CPU checks the TFREMPTY flag to see if a byte is waiting, then
--- reads it out.
-	TFI_Buffer : entity FIFO8
-		port map (
-			Data => tf_in,
-			WrClock => not SCK,
-			RDClock => not PCK,
-			WrEn => TFRWR,
-			RdEn => TFRRD,
-			Reset => RESET,
-			RPReset => RESET,
-			Q => tf_in_waiting,
-			Empty => TFREMPTY,
-			Full => TFRFULL
-		);
-
-
 
 -- The Detector Module Buffer is where the Detector Module Reader puts
 -- messages for the CPU to read out and subsequently write into the
@@ -759,10 +730,6 @@ begin
 				when relay_djr_addr => cpu_data_in <= cont_djr;
 				when relay_crhi_addr => cpu_data_in <= cont_cr(15 downto 8);
 				when relay_crlo_addr => cpu_data_in <= cont_cr(7 downto 0);
-				when relay_rc3_addr => cpu_data_in <= cont_rc(31 downto 24);
-				when relay_rc2_addr => cpu_data_in <= cont_rc(23 downto 16);
-				when relay_rc1_addr => cpu_data_in <= cont_rc(15 downto 8);
-				when relay_rc0_addr => cpu_data_in <= cont_rc(7 downto 0);
 				when errors_addr =>
 					cpu_data_in <= (others => '0');
 					cpu_data_in(0) <= DMERR;
@@ -778,7 +745,7 @@ begin
 				when dpid_addr => 
 					cpu_data_in <= dp_in_waiting;
 				when tfid_addr =>
-					cpu_data_in <= tf_in_waiting;
+					cpu_data_in <= tf_in;
 				when dmb_id_addr => cpu_data_in <= dmb_out(39 downto 32);
 				when dmb_hi_addr => cpu_data_in <= dmb_out(31 downto 24);
 				when dmb_lo_addr => cpu_data_in <= dmb_out(23 downto 16);
@@ -815,7 +782,6 @@ begin
 			DPXWR <= '0';
 			DPRRD <= '0';
 			TFXWR <= '0';
-			TFRRD <= '0';
 			DMBRD <= '0';
 			DPCONFIG <= false;
 			DMCFG <= '0';
@@ -827,7 +793,6 @@ begin
 			DPXWR <= '0';
 			DPRRD <= '0';
 			TFXWR <= '0';
-			TFRRD <= '0';
 			DMBRD <= '0';
 			if MWRACK then MWRS <= false; end if;
 			if CPUDS then 
@@ -854,6 +819,7 @@ begin
 									<= cpu_data_out(0);
 							when dpod_addr => if (DPXFULL = '0') then DPXWR <= '1'; end if;
 							when tfodh_addr => tf_out_h <= cpu_data_out;
+							when tfodm_addr => tf_out_m <= cpu_data_out;
 							when tfodl_addr => if (TFXFULL = '0') then TFXWR <= '1'; end if;
 							when dmb_read_addr => DMBRD <= '1';
 						end case;
@@ -1010,10 +976,6 @@ begin
 				when cont_djr_addr => cont_djr <= cont_data;
 				when cont_crhi_addr => cont_cr(15 downto 8) <= cont_data;
 				when cont_crlo_addr => cont_cr(7 downto 0) <= cont_data;
-				when cont_rc3_addr => cont_rc(31 downto 24) <= cont_data;
-				when cont_rc2_addr => cont_rc(23 downto 16) <= cont_data;
-				when cont_rc1_addr => cont_rc(15 downto 8) <= cont_data;
-				when cont_rc0_addr => cont_rc(7 downto 0) <= cont_data;
 				when cont_srst_addr => RST_BY_RELAY <= true;
 				when cont_fifo_ds_addr => MRDS <= true;
 				end case;
@@ -1187,8 +1149,7 @@ begin
 	-- LO, so we begin with 2 us of guaranteed LO for set-up, then a 1-us 
 	-- HI for a start bit, and the eight data bits, 1 us each. 
 	DP_Transmitter : process (SCK,RESET) is 
-	constant end_state : integer := 31;
-	variable state : integer range 0 to end_state;
+	variable state : integer range 0 to 255;
 	begin
 		if (RESET = '1') then
 			state := 0;
@@ -1226,7 +1187,7 @@ begin
 				when 1 => 
 					DPXRD <= '1';
 					state := 2;
-				when end_state =>
+				when 31 =>
 					state := 0;
 				when others =>
 					state := state + 1;
@@ -1237,8 +1198,7 @@ begin
 	-- The Display Panel Receiver receives eight-bit messages from the
 	-- display panel and writes them into the SDI Buffer.
 	DP_Receiver : process (SCK,RESET) is
-	constant end_state : integer := 20;
-	variable state : integer range 0 to end_state;
+	variable state : integer range 0 to 255;
 	variable RSDI, FSDI : std_logic;
 	begin
 		if falling_edge(SCK) then
@@ -1282,7 +1242,7 @@ begin
 					else
 						state := 2;
 					end if;
-				when end_state =>
+				when 20 =>
 					DPRWR <= '1';
 					state := 0;
 				when others =>
@@ -1298,8 +1258,7 @@ begin
 	-- set-up, then a 1-us HI for a start bit, and the eight data bits, 
 	-- 1 us each.
 	TF_Transmitter : process (SCK,RESET) is 
-	constant end_state : integer := 31;
-	variable state : integer range 0 to end_state;
+	variable state : integer range 0 to 255;
 	begin
 		if (RESET = '1') then
 			state := 0;
@@ -1337,7 +1296,7 @@ begin
 				when 1 => 
 					TFXRD <= '1';
 					state := 2;
-				when end_state =>
+				when 31 =>
 					state := 0;
 				when others =>
 					state := state + 1;
@@ -1346,10 +1305,11 @@ begin
 	end process;
 	
 	-- The Transmitting Feedthrough Receiver receives eight-bit messages 
-	-- from the Transmitting Feedthrough and writes them into the RX Buffer.
+	-- from the Transmitting Feedthrough and writes them into the tf_in
+	-- register, which we can read with the CPU. Each new byte received
+	-- updates the tf_in byte.
 	TF_Receiver : process (SCK,RESET) is
-	constant end_state : integer := 20;
-	variable state : integer range 0 to end_state;
+	variable state : integer range 0 to 255;
 	variable RRX, FRX : std_logic;
 	begin
 		if falling_edge(SCK) then
@@ -1362,21 +1322,21 @@ begin
 		if (RESET = '1') then
 			state := 0;
 			tf_in <= (others => '0');
+			tf_in_sr <= (others => '0');
 		elsif rising_edge(SCK) then
 		
 			case state is
 				when 1 =>
-					tf_in <= (others => '0');
+					tf_in_sr <= (others => '0');
 				when 4 | 6 | 8 | 10 | 12 | 14 | 16 | 18 => 
-					tf_in(7 downto 1) <= tf_in(6 downto 0);
-					tf_in(0) <= FRX; 
-				when others => tf_in <= tf_in;
+					tf_in_sr(7 downto 1) <= tf_in(6 downto 0);
+					tf_in_sr(0) <= FRX; 
+				when others => tf_in_sr <= tf_in_sr;
 			end case;
 			
-			TFRWR <= '0';
 			case state is 
 				when 0 => 
-					if (RRX = '0') and (DPRFULL = '0') then
+					if (RRX = '0') then
 						state := 1;
 					else 
 						state := 0;
@@ -1393,8 +1353,8 @@ begin
 					else
 						state := 2;
 					end if;
-				when end_state =>
-					TFRWR <= '1';
+				when 20 =>
+					tf_in <= tf_in_sr;
 					state := 0;
 				when others =>
 					state := state + 1;

@@ -1,0 +1,28 @@
+SCUBA, Version Diamond (64-bit) 3.12.1.454
+Fri May 10 22:13:39 2024
+
+Copyright (c) 1991-1994 by NeoCAD Inc. All rights reserved.
+Copyright (c) 1995 AT&T Corp.   All rights reserved.
+Copyright (c) 1995-2001 Lucent Technologies Inc.  All rights reserved.
+Copyright (c) 2001 Agere Systems   All rights reserved.
+Copyright (c) 2002-2020 Lattice Semiconductor Corporation,  All rights reserved.
+
+    Issued command   : C:\lscc\diamond\3.12\ispfpga\bin\nt64\scuba.exe -w -n FIFO24 -lang vhdl -synth synplify -bus_exp 7 -bb -arch xo2c00 -type ebfifo -depth 256 -width 24 -rwidth 24 -no_enable -pe 6 -pf 250 
+    Circuit name     : FIFO24
+    Module type      : ebfifo
+    Module Version   : 5.8
+    Ports            : 
+	Inputs       : Data[23:0], WrClock, RdClock, WrEn, RdEn, Reset, RPReset
+	Outputs      : Q[23:0], Empty, Full, AlmostEmpty, AlmostFull
+    I/O buffer       : not inserted
+    EDIF output      : FIFO24.edn
+    VHDL output      : FIFO24.vhd
+    VHDL template    : FIFO24_tmpl.vhd
+    VHDL testbench    : tb_FIFO24_tmpl.vhd
+    VHDL purpose     : for synthesis and simulation
+    Bus notation     : big endian
+    Report output    : FIFO24.srp
+    Element Usage    :
+        FIFO8KB : 2
+    Estimated Resource Usage:
+            EBR : 2

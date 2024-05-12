@@ -1,3 +1,11 @@
+Data[23]  i
+Data[22]  i
+Data[21]  i
+Data[20]  i
+Data[19]  i
+Data[18]  i
+Data[17]  i
+Data[16]  i
 Data[15]  i
 Data[14]  i
 Data[13]  i
@@ -20,6 +28,14 @@ WrEn  i
 RdEn  i
 Reset  i
 RPReset  i
+Q[23]  o
+Q[22]  o
+Q[21]  o
+Q[20]  o
+Q[19]  o
+Q[18]  o
+Q[17]  o
+Q[16]  o
 Q[15]  o
 Q[14]  o
 Q[13]  o
@@ -38,3 +54,5 @@ Q[1]  o
 Q[0]  o
 Empty  o
 Full  o
+AlmostEmpty  o
+AlmostFull  o
