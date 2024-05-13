@@ -209,7 +209,8 @@ architecture behavior of main is
 	constant relay_djr_addr : integer := 14; -- Relay Device Job Register (Read)
 	constant relay_crhi_addr : integer := 15; -- Relay Command Register HI (Read)
 	constant relay_crlo_addr : integer := 16; -- Relay Command Register LO (Read)
-	constant relay_djr_rst_addr : integer := 17; -- Reset Relay Device Job Register (Write)
+	constant relay_djr_rst_addr : integer := 17; -- Reset Device Job Register (Write)
+	constant relay_der_addr : integer := 18; -- Relay Device Element Register (Read)
 	constant comm_status_addr: integer := 22; -- Communication Status Register (Read)
 	constant dpcr_addr : integer := 23; -- Display Panel Configuration Request (Write)
 	constant dpod_addr : integer := 24; -- Display Panel Output Data (Write)
@@ -233,6 +234,7 @@ architecture behavior of main is
 	-- Relay Interface Registers.
 	signal cont_djr : std_logic_vector(7 downto 0); -- Device Job Register
 	signal cont_cr : std_logic_vector(15 downto 0); -- Command Register
+	signal cont_der : std_logic_vector(7 downto 0); -- Device Element Register
 	
 	-- Relay Interface Memory Map Constants with Read and Write as seen by the
 	-- LWDAQ Relay that is master of the interface. We respect the existing
@@ -240,6 +242,7 @@ architecture behavior of main is
 	constant cont_id_addr : integer := 0; -- Hardware Identifier (Read)
 	constant cont_sr_addr : integer := 1; -- Status Register (Read)
 	constant cont_djr_addr : integer := 3; -- Device Job Register (Read/Write)
+	constant cont_der_addr : integer := 15; -- Device Element Register (Write)
 	constant cont_hv_addr : integer := 18; -- Hardware Version (Read)
 	constant cont_fv_addr : integer := 19; -- Firmware Version (Read)
 	constant cont_crhi_addr : integer := 32; -- Command Register HI (Write)
@@ -728,6 +731,7 @@ begin
 				when relay_djr_addr => cpu_data_in <= cont_djr;
 				when relay_crhi_addr => cpu_data_in <= cont_cr(15 downto 8);
 				when relay_crlo_addr => cpu_data_in <= cont_cr(7 downto 0);
+				when relay_der_addr => cpu_data_in <= cont_der;
 				when errors_addr =>
 					cpu_data_in <= (others => '0');
 					cpu_data_in(0) <= DMERR;
@@ -972,6 +976,7 @@ begin
 				when cont_djr_addr => cont_djr <= cont_data;
 				when cont_crhi_addr => cont_cr(15 downto 8) <= cont_data;
 				when cont_crlo_addr => cont_cr(7 downto 0) <= cont_data;
+				when cont_der_addr => cont_der <= cont_data;
 				when cont_srst_addr => RST_BY_RELAY <= true;
 				when cont_fifo_ds_addr => MRDS <= true;
 				end case;

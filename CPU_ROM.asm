@@ -25,7 +25,8 @@ const irq_tmr1_addr 0x0E0D ; The interrupt timer value (Read)
 const relay_djr_addr 0x0E0E ; Relay Device Job Register (Read)
 const relay_crhi_addr 0x0E0F ; Relay Command Register HI (Read)
 const relay_crlo_addr 0x0E10 ; Relay Command Register LO (Read)
-const relay_djr_rst_addr 0x0E11 ; Reset Relay Device Job Register (Write)
+const relay_djr_rst_addr 0x0E11 ; Reset Device Job Register (Write)
+const relay_der_addr 0x0E12 ; Relay Device Element Register (Read)
 const comm_status_addr 0x0E16 ; Communication Status Register (Read)
 const dpcr_addr 0x0E17 ; Display Panel Configuration Request (Write)
 const dpod_addr 0x0E18 ; Display Panel Output Data (Write)
@@ -44,11 +45,16 @@ const tf_sr_addr 0x0E35 ; Transmitting Feedthrough Status Register (Read)
 const tf_op_addr 0x0E36 ; Transmitting Feedthrough Opcode (Write)
 const tf_n_addr 0x0E37 ; Transmitting Feedthrough Operand (Write)
 
-; Controller job numbers.
+; Controller Job Numbers.
 const read_job 3
 const command_job 10
 
-; Bit masks.
+; Device Element Numbers
+const receiver_element 1
+const stimulator_element 2
+const interface_element 3
+
+; Bit Masks.
 const reset_bit_mask 0x01
 const sel_bit_mask 0x04
 const select_all_code 0xFF
@@ -68,7 +74,7 @@ const dmbrdy_bit_mask 0x20
 const dmibsy_bit_mask 0x40
 const mrdy_bit_mask 0x80
 
-; Display panel opcodes
+; Display Panel Opcodes
 const dp_opcode_msg 0x10
 const dp_opcode_comm 0x20
 const dp_opcode_sw 0x60
@@ -360,7 +366,7 @@ main:
 ; message buffer. Each time we run through the main loop, we will
 ; either do nothing, if no message is waiting, or read a message
 ; and set it aside, or write a previous message to the buffer. See
-; diagram Message_Handler.jpg in A3042 documentation for states.
+; diagram "Message Handler" in A3042 documentation for states.
 ; ---------------------------------------------------------------
 
 ; Check the Detector Module Buffer Ready (DMBRDY) flag. If it's not 
@@ -476,7 +482,7 @@ main_done_messages:
 ; Decrement the main loop counter, which we use to manage tasks 
 ; that require attention less often than message readout. If the
 ; counter is zero, jump to the start of the main loop. Otherwise,
-; continue with infrequent tasks. 8CK
+; continue with infrequent tasks.
 ; ---------------------------------------------------------------
 dec D
 jp nz,main
@@ -531,8 +537,7 @@ main_dp_done:
 
 ; ---------------------------------------------------------------
 ; Check the Device Job Register. If it's not zero, take action and 
-; if requested action is complete, clear the register to indicate 
-; the job is done. 
+; clear the device job register to indicate the job is done. 
 ; ----------------------------------------------------------------
 ld A,(relay_djr_addr)
 add A,0x00
@@ -549,16 +554,20 @@ jp z,djr_done
 ; command bits immediately, whereas in the ODR case the bits 
 ; would be transmitted over a LWDAQ cable to the ODR, where the
 ; ODR would receive and interpret them.
-push A
 sub A,command_job
-pop A
 jp nz,not_command_job
 
-; Generate a rising edge of tp_reg(2) to show we are interpreting
-; a sixteen-bit command.
+; Generate a rising edge on tp_reg(2) to show we are acting 
+; upon a sixteen-bit command.
 ld A,(test_point_addr)
 or A,0x04                    
-ld (test_point_addr),A   
+ld (test_point_addr),A
+
+; The command can be for the receiver, stimulator, or interface.
+rec_cmd:
+ld A,(relay_der_addr)
+sub A,receiver_element
+jp nz,stim_cmd
 
 ; Read the command and see if it matches the reset command. If so, we
 ; reboot the controller. The reboot does not reset the device job 
@@ -571,11 +580,12 @@ ld (cpu_rst_addr),A
 wait
 
 ; Message Select Command. We interpret the command and modify the message
-; selection array accordingly.
+; selection array accordingly. If this is not a message select command, we
+; ignore the command.
 msg_select:
 ld A,(relay_crlo_addr)
 and A,sel_bit_mask
-jp z,other_commands
+jp z,done_cmd_xmit
 
 ; Check the message select code.
 ld A,(relay_crhi_addr)
@@ -623,8 +633,28 @@ dec B
 jp nz,select_all_loop
 jp done_cmd_xmit
 
-; Other commands we ignore.
-other_commands:
+; If the command is meant for the stimulator, transmit it to the
+; stimulator through the transmitting feedthrough interface.
+stim_cmd:
+ld A,(relay_der_addr)
+sub A,stimulator_element
+jp nz,intf_cmd
+ld A,(relay_crlo_addr)
+ld (tf_op_addr),A
+ld A,(relay_crhi_addr)
+ld (tf_n_addr),A
+jp done_cmd_xmit
+
+; If the command is meant for the logic input-output interface,
+; transmit the command through the transmitting feedthrough interface.
+intf_cmd:
+ld A,(relay_der_addr)
+sub A,interface_element
+jp nz,done_cmd_xmit
+ld A,(relay_crlo_addr)
+ld (tf_op_addr),A
+ld A,(relay_crhi_addr)
+ld (tf_n_addr),A
 jp done_cmd_xmit
 
 ; Done with all supported command jobs. Generate a falling, edge on 

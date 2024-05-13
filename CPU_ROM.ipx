@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<DiamondModule name="CPU_ROM" module="CPU_ROM" VendorName="Lattice Semiconductor Corporation" generator="IPexpress" date="2024 05 12 13:18:35.336" version="5.4" type="Module" synthesis="synplify" source_format="VHDL">
+<DiamondModule name="CPU_ROM" module="CPU_ROM" VendorName="Lattice Semiconductor Corporation" generator="IPexpress" date="2024 05 13 17:50:20.505" version="5.4" type="Module" synthesis="synplify" source_format="VHDL">
   <Package>
-		<File name="" type="" modified="2024 05 12 13:18:35.147"/>
-		<File name="CPU_ROM.lpc" type="lpc" modified="2024 05 12 13:18:33.378"/>
-		<File name="CPU_ROM.vhd" type="top_level_vhdl" modified="2024 05 12 13:18:33.462"/>
-		<File name="CPU_ROM_tmpl.vhd" type="template_vhdl" modified="2024 05 12 13:18:33.462"/>
-		<File name="c:/kevan/a3042/p3042bb/cpu_rom.mem" type="mem" modified="2024 05 12 13:18:13.848"/>
-		<File name="tb_CPU_ROM_tmpl.vhd" type="testbench_vhdl" modified="2024 05 12 13:18:33.462"/>
+		<File name="" type="" modified="2024 05 13 17:50:20.437"/>
+		<File name="CPU_ROM.lpc" type="lpc" modified="2024 05 13 17:50:13.812"/>
+		<File name="CPU_ROM.vhd" type="top_level_vhdl" modified="2024 05 13 17:50:13.858"/>
+		<File name="CPU_ROM_tmpl.vhd" type="template_vhdl" modified="2024 05 13 17:50:13.858"/>
+		<File name="c:/kevan/a3042/p3042bb/cpu_rom.mem" type="mem" modified="2024 05 13 17:50:05.627"/>
+		<File name="tb_CPU_ROM_tmpl.vhd" type="testbench_vhdl" modified="2024 05 13 17:50:13.858"/>
   </Package>
 </DiamondModule>
