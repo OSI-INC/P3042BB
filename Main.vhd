@@ -45,10 +45,11 @@
 -- module index map to match latest detector module firmware 2.4. Add status
 -- flags to timestamp message as payload.
 
--- V5.1, 12-MAY-24: Add serial interface for Transmitting Feedthrough (A3042TF).
+-- V5.1, 17-MAY-24: Add serial interface for Transmitting Feedthrough (A3042TF).
 -- Take over TP3 and TP4 for TX and RX. Outgoing data is sixteen-bit words-- that the CPU writes into a buffer for transmission. Incoming data is eight bits 
 -- updated each time an eight-bit transmission is received from the feedthrough.
--- Remove unused thirty-two bit repeat counter.
+-- Remove unused thirty-two bit repeat counter. The TX transmitter asserts TX during
+-- RESET, which in turn resets the TF.
 
 
 
@@ -74,7 +75,7 @@ entity main is
 		REN_not : out std_logic;
 		RWE_not : out std_logic;
 		
-		RESET_pin : inout std_logic;
+		RESET_not : inout std_logic;
 		
 		indicators : out std_logic_vector(1 to 19);
 		config_lamp : out std_logic;
@@ -356,7 +357,7 @@ begin
 	
 	-- The Input Processor provides synchronized versions of incoming 
 	-- signals and positive-polarity versions too.
-	Input_Processor : process (CK,RESET) is
+	Input_Processor : process (CK) is
 	constant max_state : integer := 15;
 	variable rcv_state, next_rcv_state : integer range 0 to max_state;
 	begin
@@ -366,7 +367,7 @@ begin
 			MRDY <= MRDY_in;
 			DMERR <= DMERR_in;
 			DMRST <= (DMRST_pin = '1');
-			BBRST <= (RESET_pin = '0');
+			BBRST <= (RESET_not = '0');
 		end if;
 		
 		CWR <= (CWR_in = '0');
@@ -389,25 +390,25 @@ begin
 	variable initiate : boolean;
 	begin
 		
-		-- If the Display Panel drives DMRST HI, we drive RESET_pin LO. The 
-		-- reset monitor, U5, holds RESET_pin LO for a hundred milliseconds. 
-		-- The LO on the hardware RESET line forces Relay and the Controller 
-		-- to reset. On the Controller, all state machines reset and the CPU
-		-- reboots. We decide that the Display Panel is driving DMRST HI 
+		-- If the Display Panel drives DMRST HI, we drive RESET_not LO, which
+		-- in turn asserts BBRST. All controller state machines reset and the
+		-- CPU reboots. We decide that the Display Panel is driving DMRST HI 
 		-- when we have had DMRST_BY_CPU unasserted for some time, and yet 
-		-- we see that DMRST is asserted. We use SCK, 2 MHz, to generate the
-		-- required duration of the DMRST without DMRST_BY_CPU.
+		-- DMRST remains asserted. We use SCK, 2 MHz, to generate a sufficient
+		-- waiting period to be sure DMRST comes from the display panel. We 
+		-- then generate a 500-ns LO pulse on RESET_not, which in turn causes
+		-- a pulse on RESET.
 		if rising_edge(SCK) then
-			if (DMRST_pin = '0') or DMRST_BY_CPU then
+			if (DMRST_pin = '0') or (DMRST_BY_CPU) then
 				count := 0;
-				RESET_pin <= 'Z';
+				RESET_not <= 'Z';
 			else
 				if count < reset_len then
 					count := count + 1;
-					RESET_pin <= 'Z';
+					RESET_not <= 'Z';
 				else
 					count := reset_len;
-					RESET_pin <= '0';
+					RESET_not <= '0';
 				end if;
 			end if;
 		end if;
@@ -659,8 +660,8 @@ begin
 -- operation code, the bottom eight bits are an operand.
 	TFO_Buffer : entity FIFO16
 		port map (
-			Data(15 downto 8) => tf_out_opcode,
-			Data(7 downto 0) => cpu_data_out,
+			Data(15 downto 8) => cpu_data_out,
+			Data(7 downto 0) => tf_out_opcode,
 			WrClock => not PCK,
 			RDClock => not SCK,
 			WrEn => TFXWR,
@@ -1263,6 +1264,7 @@ begin
 	begin
 		if (RESET = '1') then
 			state := 0;
+			TX <= '1';
 		elsif rising_edge(SCK) then
 			case state is
 				when 4 => TX <= '1';
