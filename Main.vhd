@@ -429,7 +429,7 @@ begin
 		-- or BBRST is asserted by some other process, we will drive !RESET 
 		-- LO for 131 ms.
 		if rising_edge(SCK) then
-			if BBRST and (not BBRSTD) then 
+			if (BBRST and (not BBRSTD)) or dp_init_rst then 
 				bb_count := 0;
 				RESET_not <= '0';
 			else
