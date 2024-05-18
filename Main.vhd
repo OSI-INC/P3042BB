@@ -49,7 +49,9 @@
 -- Take over TP3 and TP4 for TX and RX. Outgoing data is sixteen-bit words-- that the CPU writes into a buffer for transmission. Incoming data is eight bits 
 -- updated each time an eight-bit transmission is received from the feedthrough.
 -- Remove unused thirty-two bit repeat counter. The TX transmitter asserts TX during
--- RESET, which in turn resets the TF.
+-- RESET, which in turn resets the TF. Re-work the Reset Arbiter so it holds down
+-- the base board !RESET after pressing base board or display panel reset switches.
+-- Make mid-level RESET pulse long enough to cause TF to reset.
 
 
 
@@ -124,6 +126,7 @@ architecture behavior of main is
 	signal RST_BY_RELAY : boolean := false; -- Reset by Relay
 	signal DMRST_BY_CPU : boolean := false; -- Reset Detector Modules by CPU
 	signal BBRST : boolean; -- Reset by Base Board Switch
+	signal BBRSTD : boolean; -- BBRST Delayed
 	signal DMRST : boolean; -- Reset from Detector Module Bus
 
 -- Synchronized, delayed, and inverted inputs.
@@ -134,7 +137,7 @@ architecture behavior of main is
 -- Clock and Timing Signals.
 	signal LOCK : std_logic; -- Phase Locked Loop Has Locked
 	signal FCK : std_logic; -- Fast Clock (80 MHz)
-	signal CK : std_logic; -- State machine Clock (40 MHz)
+	signal CK : std_logic; -- State Machine Clock (40 MHz)
 	signal PCK : std_logic; -- Processor Clock (20 MHz)
 	signal SCK : std_logic; -- Serial Clock (2 MHz)
 	
@@ -357,7 +360,7 @@ begin
 	
 	-- The Input Processor provides synchronized versions of incoming 
 	-- signals and positive-polarity versions too.
-	Input_Processor : process (CK) is
+	Input_Processor : process (CK,SCK) is
 	constant max_state : integer := 15;
 	variable rcv_state, next_rcv_state : integer range 0 to max_state;
 	begin
@@ -367,7 +370,11 @@ begin
 			MRDY <= MRDY_in;
 			DMERR <= DMERR_in;
 			DMRST <= (DMRST_pin = '1');
+		end if;
+		
+		if rising_edge(SCK) then
 			BBRST <= (RESET_not = '0');
+			BBRSTD <= BBRST;		
 		end if;
 		
 		CWR <= (CWR_in = '0');
@@ -375,19 +382,24 @@ begin
 	
 	-- The Reset Arbitrator manages the three levels of reset. The Top-Level 
 	-- Reset is when we press either the base board reset switch or the display 
-	-- panel reset switch. The Relay, Controller, Detector Modules, Transmitting
-	-- Feedthrough and Display Panel all reset. The hardware reset monitor, U5, 
-	-- generates a 100-ms LO on !RESET. A Mid-Level Reset is one in which the 
-	-- Relay remains active, but the Controller, Detector Modules, Transmitting 
-	-- Feedthrough and Display Panel all reset. A Low-Level Reset is one in which 
-	-- only the Detector Modules, Transmitting Feedthrough, and Display Panel reset. 
-	-- The Low-Level reset we handle directly from the Controller's CPU using
-	-- DMRST_BY_CPU, which we use to drive DMRST_pin HI. The high-level reset
-	-- provoked by the Display Panel button we handle in the Reset Arbitrator.
+	-- panel reset switch. Pressing either switch causes a 100-ms LO on the base
+	-- board !RESET signal. The Relay, Controller, Detector Modules, Transmitting
+	-- Feedthrough and Display Panel all reset in response to !RESET. A Mid-Level 
+	-- Reset is one in which the Relay remains active, but everything else resets. 
+	-- The !RESET signal on the base board is not driven LO. The RESET lamp on 
+	-- the display panel will flash. A Low-Level Reset is one in which only the 
+	-- Detector Modules, and Display Panel reset. The Low-Level reset we handle 
+	-- directly from the Controller's CPU using DMRST_BY_CPU, which we use to drive 
+	-- DMRST_pin HI. In a low-level reset, the lamp on the display panel will 
+	-- flash briefly.
 	Reset_Arbitrator : process (CK,SCK) is
-	constant reset_len : integer := 63;
-	variable count, state, next_state : integer range 0 to reset_len;
-	variable initiate : boolean;
+	constant dp_init_len : integer := 63;
+	variable dp_count : integer range 0 to dp_init_len;
+	constant mid_rst_len : integer := 65535;
+	variable mid_state, mid_next_state : integer range 0 to mid_rst_len;
+	constant bb_rst_len : integer := 262143;
+	variable bb_count : integer range 0 to bb_rst_len;
+	variable mid_init_rst, dp_init_rst : boolean;
 	begin
 		
 		-- If the Display Panel drives DMRST HI, we drive RESET_not LO, which
@@ -396,19 +408,37 @@ begin
 		-- when we have had DMRST_BY_CPU unasserted for some time, and yet 
 		-- DMRST remains asserted. We use SCK, 2 MHz, to generate a sufficient
 		-- waiting period to be sure DMRST comes from the display panel. We 
-		-- then generate a 500-ns LO pulse on RESET_not, which in turn causes
-		-- a pulse on RESET.
+		-- then generate a 500-ns dp_init_rst flag, which will provoke the
+		-- BBRST state machine.
 		if rising_edge(SCK) then
-			if (DMRST_pin = '0') or (DMRST_BY_CPU) then
-				count := 0;
-				RESET_not <= 'Z';
-			else
-				if count < reset_len then
-					count := count + 1;
-					RESET_not <= 'Z';
+			if (DMRST_pin = '1') and (not DMRST_BY_CPU) then
+				if dp_count < dp_init_len then
+					dp_count := dp_count + 1;
+					dp_init_rst := false;
 				else
-					count := reset_len;
+					dp_count := dp_init_len;
+					dp_init_rst := true;
+				end if;
+			else
+				dp_count := 0;
+				dp_init_rst := false;
+			end if;
+		end if;
+		
+		-- If we have dp_init_rst pulse from the Display Panel reset switch,
+		-- or BBRST is asserted by some other process, we will drive !RESET 
+		-- LO for 131 ms.
+		if rising_edge(SCK) then
+			if BBRST and (not BBRSTD) then 
+				bb_count := 0;
+				RESET_not <= '0';
+			else
+				if bb_count < bb_rst_len then
+					bb_count := bb_count + 1;
 					RESET_not <= '0';
+				else 
+					bb_count := bb_rst_len;
+					RESET_not <= 'Z';
 				end if;
 			end if;
 		end if;
@@ -422,32 +452,34 @@ begin
 			end if;
 		end if;
 
-		-- If we have BBRST asserted, or the have the CPU or Relay trying
-		-- to reset the Controller, we initiate a controller reset, which
-		-- will in turn reset the detector modules by asserting DMRST. We
-		-- run this state machine of CK because we want to detect the PCK
-		-- pulse on RST_BY_CPU generated by a CPU write to its own reset
-		-- register. Following this pulse, we want to generate a substantial
-		-- pulse on RESET for the Controller.
+		-- We generate a mid-level reset if we have the CPU or Relay trying
+		-- to reset the Controller. We also generate a mid-level reset whenever
+		-- we have a high-level reset caused by BBRST. The mid-level reset is
+		-- provoked by the local RESET signal. This in turn asserts DMRST to
+		-- reset the detector modules. We run this state machine of CK because 
+		-- we want to detect the PCK pulse on RST_BY_CPU generated by a CPU 
+		-- write to its own reset register. The mid-level pulse we generate on
+		-- RESET is long enough to cause the Transmitting Feedthrough to reset
+		-- by the assertion of a HI on TX.
 		if rising_edge(CK) then
-			initiate := BBRST or RST_BY_CPU or RST_BY_RELAY;
-			if state = 0 then
-				if initiate then 
-					next_state := 1;
+			mid_init_rst := RST_BY_CPU or RST_BY_RELAY;
+			if mid_state = 0 then
+				if mid_init_rst then 
+					mid_next_state := 1;
 				else 
-					next_state := 0;
+					mid_next_state := 0;
 				end if;
-			elsif state = reset_len then
-				if initiate then
-					next_state := reset_len;
+			elsif mid_state = mid_rst_len then
+				if mid_init_rst then
+					mid_next_state := mid_rst_len;
 				else
-					next_state := 0;
+					mid_next_state := 0;
 				end if;
 			else
-				next_state := state + 1;
+				mid_next_state := mid_state + 1;
 			end if;
-			RESET <= to_std_logic(state > 1);
-			state := next_state;
+			RESET <= to_std_logic((mid_state > 1) or BBRST);
+			mid_state := mid_next_state;
 		end if;
 	end process;
 	
