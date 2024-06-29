@@ -45,13 +45,14 @@
 -- module index map to match latest detector module firmware 2.4. Add status
 -- flags to timestamp message as payload.
 
--- V5.1, 17-MAY-24: Add serial interface for Transmitting Feedthrough (A3042TF).
+-- V5.1, 29-JUN-24: Add serial interface for Transmitting Feedthrough (A3042TF).
 -- Take over TP3 and TP4 for TX and RX. Outgoing data is sixteen-bit words-- that the CPU writes into a buffer for transmission. Incoming data is eight bits 
 -- updated each time an eight-bit transmission is received from the feedthrough.
 -- Remove unused thirty-two bit repeat counter. The TX transmitter asserts TX during
 -- RESET, which in turn resets the TF. Re-work the Reset Arbiter so it holds down
 -- the base board !RESET after pressing base board or display panel reset switches.
--- Make mid-level RESET pulse long enough to cause TF to reset.
+-- Make mid-level RESET pulse long enough to cause TF to reset. Add read location in
+-- control space for the digital input values received from the TF.
 
 
 
