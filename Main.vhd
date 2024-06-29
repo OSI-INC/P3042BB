@@ -97,7 +97,7 @@ entity main is
 		DMCK : out std_logic; -- Demodulator Clock (DC7)
 		
 		TX : out std_logic; -- Transmitting Feedthrough Transmit
-		RX_in : in std_logic; -- Transmitting Feedthrough Receive
+		RX : in std_logic; -- Transmitting Feedthrough Receive
 		
 		TP1, TP2 : out std_logic -- Test Point Register
 	);	
@@ -251,6 +251,7 @@ architecture behavior of main is
 	constant cont_fv_addr : integer := 19; -- Firmware Version (Read)
 	constant cont_crhi_addr : integer := 32; -- Command Register HI (Write)
 	constant cont_crlo_addr : integer := 33; -- Command Register LO (Write)
+	constant cont_di_lo : integer := 38; -- Digital Inputs LO (Read)
 	constant cont_cfsw_addr : integer := 40; -- Configuration Switch (Read)
 	constant cont_srst_addr : integer := 41; -- Software Reset of Controller (Write)
 	constant cont_fifo_av_addr : integer := 61; -- Fifo Blocks Available (Read)
@@ -277,6 +278,7 @@ architecture behavior of main is
 	signal TFXRD : std_logic; -- Transmitting Feedthrough Transmit Read
 	signal TFXEMPTY : std_logic; -- Transmitting Feedthrough Transmit Buffer Empty
 	signal TFXFULL : std_logic; -- Transmitting Feedthrough Transmit Buffer Full
+	signal TFRA : std_logic; -- Transmitting Feedthrough Receive Active
 	signal tf_out_opcode, tf_in, tf_in_sr : std_logic_vector(7 downto 0);
 	signal tf_out : std_logic_vector(15 downto 0);
 	
@@ -1032,6 +1034,8 @@ begin
 					cont_data <= std_logic_vector(to_unsigned(hardware_version,8));
 				when cont_fv_addr =>
 					cont_data <= std_logic_vector(to_unsigned(firmware_version,8));
+				when cont_di_lo => 
+					cont_data <= tf_in;
 				when cont_cfsw_addr => -- The Relay looks for a zero to configure.
 					cont_data(0) <= to_std_logic(not CONFIG);
 				when cont_fifo_av_addr =>
@@ -1358,16 +1362,17 @@ begin
 	-- The Transmitting Feedthrough Receiver receives eight-bit messages 
 	-- from the Transmitting Feedthrough and writes them into the tf_in
 	-- register, which we can read with the CPU. Each new byte received
-	-- updates the tf_in byte.
+	-- updates the tf_in byte. The RX signal is usually low. We wait for
+	-- a 1-us HI followed by eight bits at 1 MBPS.
 	TF_Receiver : process (SCK,RESET) is
 	variable state : integer range 0 to 255;
 	variable RRX, FRX : std_logic;
 	begin
 		if falling_edge(SCK) then
-			FRX := RX_in;
+			FRX := RX;
 		end if;
 		if rising_edge(SCK) then
-			RRX := RX_in;
+			RRX := RX;
 		end if;
 		
 		if (RESET = '1') then
@@ -1380,7 +1385,7 @@ begin
 				when 1 =>
 					tf_in_sr <= (others => '0');
 				when 4 | 6 | 8 | 10 | 12 | 14 | 16 | 18 => 
-					tf_in_sr(7 downto 1) <= tf_in(6 downto 0);
+					tf_in_sr(7 downto 1) <= tf_in_sr(6 downto 0);
 					tf_in_sr(0) <= FRX; 
 				when others => tf_in_sr <= tf_in_sr;
 			end case;
@@ -1411,6 +1416,8 @@ begin
 					state := state + 1;
 			end case;
 		end if;
+		
+		TFRA <= to_std_logic(state >= 3);
 	end process;		
 
 	-- The UPLOAD flag is set when the Relay is reading from the message buffer.
@@ -1473,7 +1480,7 @@ begin
 	--	xor dub(4) xor dub(5) xor dub(6) xor dub(7); 
 	
 	 -- A pulse during interrupt execution.
-	TP2 <= tp_reg(1);
+	TP2 <= TFRA;
 	
 	-- A pulse while detector module interface is reading daisy chain.
 	-- TP2 <= DMIBSY; 
