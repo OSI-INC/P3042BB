@@ -52,8 +52,10 @@
 -- RESET, which in turn resets the TF. Re-work the Reset Arbiter so it holds down
 -- the base board !RESET after pressing base board or display panel reset switches.
 -- Make mid-level RESET pulse long enough to cause TF to reset. Add read location in
--- control space for the digital input values received from the TF. In software, we
--- refine duplicate rejection to check the contents of the messages as well.
+-- control space for the digital input values received from the TF. 
+
+-- V5.2, 11-JUL-24: In software, we refine duplicate rejection to check the contents 
+-- of the messages as well. 
 
 
 
