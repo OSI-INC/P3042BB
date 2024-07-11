@@ -376,20 +376,38 @@ and A,dmbrdy_bit_mask
 jp z,main_no_msg
 
 ; Read the new message out of the message buffer. The new message
-; will be available in the dmb locations immediately after we write
+; will be available in the dmb location immediately after we write
 ; to the Detector Module Buffer Read location. The message buffer 
 ; guarantees that the message ID is valid before storing in the 
 ; buffer. 3CK
 ld (dmb_read_addr),A
 
 ; Check if the new message has the same ID as our previous message. If 
-; not, we jump to main_new_id. 14CK
+; not, we jump to main_new_msg. 14CK
 ld A,(dmb_id_addr)
 push A
 pop B
 ld A,(msg_id_prv)
 sub A,B
-jp nz,main_new_id
+jp nz,main_new_msg
+
+; Check if the new message has the same high byte as our previous
+; message. If not, we jump to main_new_msg. 14CK
+ld A,(dmb_hi_addr)
+push A
+pop B
+ld A,(msg_hi_prv)
+sub A,B
+jp nz,main_new_msg
+
+; Check if the new message has the same lo byte as our previous
+; message. If not, we jump to main_new_msg. 14CK
+ld A,(dmb_lo_addr)
+push A
+pop B
+ld A,(msg_lo_prv)
+sub A,B
+jp nz,main_new_msg
 
 ; Check to see if the previous message has power equal to or greater
 ; than the new message. If so, we ignore the new message. We are 
@@ -406,8 +424,10 @@ jp nc,main_done_messages
 jp main_overwrite_prv
 
 ; Check to see if the previous message is valid. If not, we don't
-; save it, but just overwrite it with the new message.
-main_new_id:
+; save it, but just overwrite it with the new message. A valid ID
+; is one that contains at least one non-zero bit after being masked
+; by the valid_id_mask.
+main_new_msg:
 ld A,(msg_id_prv)
 and A,valid_id_mask
 jp z,main_overwrite_prv

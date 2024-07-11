@@ -52,7 +52,8 @@
 -- RESET, which in turn resets the TF. Re-work the Reset Arbiter so it holds down
 -- the base board !RESET after pressing base board or display panel reset switches.
 -- Make mid-level RESET pulse long enough to cause TF to reset. Add read location in
--- control space for the digital input values received from the TF.
+-- control space for the digital input values received from the TF. In software, we
+-- refine duplicate rejection to check the contents of the messages as well.
 
 
 
@@ -91,7 +92,7 @@ entity main is
 		DMRST_pin : inout std_logic; -- Detector Module Reset (DC0)
 		DMRC : out std_logic; -- Detector Module Read Control (DC1)
 		DMERR_in : in std_logic; -- Detecor Module Error (DC2)
-		MRDY_in : in std_logic; -- Incoming Message Flag (DC3)
+		MRDY_in : in std_logic; -- Message Ready Flag (DC3)
 		DMCFG : inout std_logic; -- Detector Module Show Lamps (DC4)
 		SDI_in : in std_logic; -- Serial Data In (DC5)
 		SDO : out std_logic; -- Serial Data Out (DC6)
