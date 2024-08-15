@@ -57,6 +57,9 @@
 -- V5.2, 11-JUL-24: In software, we refine duplicate rejection to check the contents 
 -- of the messages as well. 
 
+-- V5.3, 15-AUG-24: Increase drive current of DMCK to 24 mA. Increment hardware version
+-- to 2 to indicate presence of the DMCK Termination Modificaiton. 
+
 
 
 -- Global constants and types.  
@@ -108,7 +111,7 @@ entity main is
 
 -- Version numbers.
 	constant hardware_id : integer := 42;
-	constant hardware_version : integer := 1;
+	constant hardware_version : integer := 2;
 	constant firmware_version : integer := 5;
 
 -- Configuration of OSR8.
