@@ -41,9 +41,10 @@
 -- detector module buffer instead of the output. 
 
 -- V4.3, 05-JAN-23: Swap UPLOAD and EMPTY in communication status register.
--- Improve comments. Increase fifo_near_empty from 15 to 128. Adjust detector 
--- module index map to match latest detector module firmware 2.4. Add status
--- flags to timestamp message as payload.
+-- Improve comments. Increase fifo_near_empty from 15 to 128 to improve the
+-- buffer empty indicator behavior. Adjust the detector module index map to match 
+-- latest detector module firmware 2.4. Add status flags to timestamp message as 
+-- payload.
 
 -- V5.1, 29-JUN-24: Add serial interface for Transmitting Feedthrough (A3042TF).
 -- Take over TP3 and TP4 for TX and RX. Outgoing data is sixteen-bit words-- that the CPU writes into a buffer for transmission. Incoming data is eight bits 
@@ -716,7 +717,7 @@ begin
 
 -- The Detector Module Buffer is where the Detector Module Reader puts
 -- messages for the CPU to read out and subsequently write into the
--- Message Buffer. It is five bytes wide. When it's Empty flag is 
+-- Message Buffer. It is forty bits wide. When it's Empty flag is 
 -- not set, a message is ready to read.
 	DM_Buffer : entity FIFO40
 		port map (
@@ -1069,25 +1070,27 @@ begin
 	
 	-- The Detector Module Interface watches for MRDY, which indicates
 	-- that one or more detector modules has a message ready for readout
-	-- It reads the first byte of the front message and checks if it's a 
-	-- valid ID byte. If not, the process ends the readout and returns
-	-- to its rest state. If valid, the interface reads the remaining
-	-- four bytes. It stores the first byte of the message in the top
-	-- eight bits. The last is in the bottom eight bits. The write occurs 
-	-- on the falling edge of SCK when DMBWR is asserted. The interface 
-	-- runs off SCK, which has period 500 ns. It asserts Detector Module 
-	-- Read Control (DMRC) to start the read, as required by the daisy 
-	-- chain protocol. It asserts Data Strobe Upstream (DSU) to get the 
-	-- first byte. Subsequent DS cycles get the remaining bytes. Total read 
-	-- time is 500 ns * 13 = 6.5 us. If one of the detector modules
-	-- fails, breaking the daisy-chain, those upstream will assert MRDY
-	-- continuously. The buffer will fill up. We stop writing to the buffer
-	-- when it is full and keep the detector module waiting until the buffer 
-	-- is no longer full. The interface sets a flag DMIBSY when it is not in
-	-- its rest state. This flag is available to the CPU in the communications
-	-- status register. Whe the interface sees Detector Module Configure
-	-- (DMCFG) asserted, it starts a configuration access, asserting DMRC
-	-- until DMCFG is unasserted. While both DMCFG and DMRC are asserted,
+	-- The interface will read these messages one byte at a time from
+	-- the daisy chain. When it sees MRDY, it asserts DMRC and then 
+	-- uses DSU to read the first message byte from the daisy chain. If 
+	-- this byte is invalid, the interface returns to its rest state. In
+	-- doing so, it unasserts DMRC, which causes the detector module that
+	-- provided the ID byte to discard its message. If the ID byte is valid, 
+	-- the interface reads four more bytes from the daisy chain. It now has 
+	-- forty bits and it stores them all in the Detector Module Buffer. The 
+	-- write to the buffer occurs on the falling edge of SCK when DMBWR is 
+	-- asserted. The interface runs off SCK. The interface asserts DMRC to 
+	-- start the read, as required by the daisy chain protocol. It asserts 
+	-- Data Strobe Upstream (DSU) to get the first byte. Subsequent DS cycles 
+	-- get the remaining bytes. Total read time is thirteen SCK periods. 
+	-- If one of the detector modules fails, breaking the daisy-chain, those 
+	-- upstream will assert MRDY continuously. The buffer will fill up. We stop 
+	-- writing to the buffer when it is full and keep the detector module waiting 
+	-- until the buffer is no longer full. The interface sets a flag DMIBSY when 
+	-- it is not in its rest state. This flag is available to the CPU in the 
+	-- communications status register. Whe the interface sees Detector Module 
+	-- Configure (DMCFG) asserted, it starts a configuration access, asserting 
+	-- DMRC until DMCFG is unasserted. While both DMCFG and DMRC are asserted,
 	-- the detector modules calculate their position in the daisy chain.
 	Detector_Module_Interface : process (SCK,RESET) is
 	variable state, next_state : integer range 0 to 15;
@@ -1483,12 +1486,7 @@ begin
 	TP1 <= tp_reg(0); 
 	
 	-- Shows changes in daisy chain data lines.
-	-- TP1 <= dub(0) xor dub(1) xor dub(2) xor dub(3) 
-	--	xor dub(4) xor dub(5) xor dub(6) xor dub(7); 
-	
-	 -- A pulse during interrupt execution.
-	TP2 <= TFRA;
-	
-	-- A pulse while detector module interface is reading daisy chain.
-	-- TP2 <= DMIBSY; 
+	TP2 <= dub(0) xor dub(1) xor dub(2) xor dub(3) 
+		xor dub(4) xor dub(5) xor dub(6) xor dub(7); 
+		
 end behavior;
