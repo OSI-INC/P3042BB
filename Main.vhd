@@ -61,6 +61,9 @@
 -- V5.3, 15-AUG-24: Increase drive current of DMCK to 24 mA. Increment hardware version
 -- to 2 to indicate presence of the DMCK Termination Modificaiton. 
 
+-- V5.4, 14-AUG-25: Accelerate detector module readout. Dedicate TP1 to tp_reg(0) and
+-- TP2 to XOR of daisy chain data bus.
+
 
 
 -- Global constants and types.  
@@ -1070,28 +1073,27 @@ begin
 	
 	-- The Detector Module Interface watches for MRDY, which indicates
 	-- that one or more detector modules has a message ready for readout
-	-- The interface will read these messages one byte at a time from
-	-- the daisy chain. When it sees MRDY, it asserts DMRC and then 
-	-- uses DSU to read the first message byte from the daisy chain. If 
-	-- this byte is invalid, the interface returns to its rest state. In
-	-- doing so, it unasserts DMRC, which causes the detector module that
-	-- provided the ID byte to discard its message. If the ID byte is valid, 
-	-- the interface reads four more bytes from the daisy chain. It now has 
-	-- forty bits and it stores them all in the Detector Module Buffer. The 
-	-- write to the buffer occurs on the falling edge of SCK when DMBWR is 
-	-- asserted. The interface runs off SCK. The interface asserts DMRC to 
-	-- start the read, as required by the daisy chain protocol. It asserts 
-	-- Data Strobe Upstream (DSU) to get the first byte. Subsequent DS cycles 
-	-- get the remaining bytes. Total read time is thirteen SCK periods. 
-	-- If one of the detector modules fails, breaking the daisy-chain, those 
-	-- upstream will assert MRDY continuously. The buffer will fill up. We stop 
-	-- writing to the buffer when it is full and keep the detector module waiting 
-	-- until the buffer is no longer full. The interface sets a flag DMIBSY when 
-	-- it is not in its rest state. This flag is available to the CPU in the 
-	-- communications status register. Whe the interface sees Detector Module 
-	-- Configure (DMCFG) asserted, it starts a configuration access, asserting 
-	-- DMRC until DMCFG is unasserted. While both DMCFG and DMRC are asserted,
-	-- the detector modules calculate their position in the daisy chain.
+	-- When it sees MRDY, it asserts Detector Module Read Control (DMRC).
+	-- It then proceeds to read out the five bytes of the detector module
+	-- message using both the rising and falling edges of DSU. This readout
+	-- will be abandoned, however, if the first byte is not a valid ID
+	-- byte. In abandoning the readout, the interface unasserts DMRC and
+	-- the detector module will discard its message. Once the interface
+	-- has acquired five bytes, it stores them as a forty-bit record in the
+	-- Detector Module Buffer (DMB). If one of the detector modules fails, 
+	-- breaking the daisy-chain, the modules upstream of the failure will 
+	-- assert MRDY continuously. Most likely, we will be reading messages
+	-- with ID byte zero, and these we will discard. If, however, the 
+	-- corrupted message read from the faulty module presents a valid ID,
+	-- we will keep reading the same corrupted message and our buffer will
+	-- fill up. We stop writing to the buffer when it is full and keep the 
+	-- detector modules waiting until the buffer is no longer full. The interface
+	-- sets a flag DMIBSY when it is not in its rest state. This flag is available 
+	-- to the CPU in the communications status register. Whe the interface sees 
+	-- Detector Module Configure (DMCFG) asserted, it starts a configuration 
+	-- access, asserting DMRC until DMCFG is unasserted. During this cycle,
+	-- the detector modules will be calculating their position in the daisy
+	-- chain.
 	Detector_Module_Interface : process (SCK,RESET) is
 	variable state, next_state : integer range 0 to 15;
 	begin
@@ -1122,29 +1124,19 @@ begin
 					DMRC <= '1'; DSU <= '1';
 				when 3 => 
 					DMRC <= '1'; DSU <= '0'; dmb_in(39 downto 32) <= dub;
-				when 4 => 
+				when 4 =>
 					if (dmb_in(35 downto 32) = "0000") then
 						next_state := 0;
 					end if;
-					DMRC <= '1'; DSU <= '1';
-				when 5 => 
-					DMRC <= '1'; DSU <= '0'; dmb_in(31 downto 24) <= dub;
-				when 6 => 
-					DMRC <= '1'; DSU <= '1'; 
-				when 7 => 
+					DMRC <= '1'; DSU <= '1'; dmb_in(31 downto 24) <= dub;
+				when 5 =>
 					DMRC <= '1'; DSU <= '0'; dmb_in(23 downto 16) <= dub;
-				when 8 => 
-					DMRC <= '1'; DSU <= '1';
-				when 9 => 
-					DMRC <= '1'; DSU <= '0'; dmb_in(15 downto 8) <= dub;
-				when 10 => 
-					DMRC <= '1'; DSU <= '1';
-				when 11 => 
-					DMRC <= '1'; DSU <= '0'; dmb_in(7 downto 0) <= dub;
-				when 12 => 
-					DMRC <= '0'; DSU <= '0';
-					next_state := 0;
+				when 6 => 
+					DMRC <= '1'; DSU <= '1'; dmb_in(15 downto 8) <= dub;
+				when 7 => 
+					DMRC <= '0'; DSU <= '0'; dmb_in(7 downto 0) <= dub;
 					DMBWR <= '1';
+					next_state := 0;
 				when 15 =>
 					DMRC <= '1'; DSU <= '0';
 					if (DMCFG = '1') then
