@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<DiamondModule name="FIFO40" module="FIFO40" VendorName="Lattice Semiconductor Corporation" generator="IPexpress" date="2022 12 22 14:01:51.956" version="5.8" type="Module" synthesis="synplify" source_format="VHDL">
+<DiamondModule name="FIFO40" module="FIFO40" VendorName="Lattice Semiconductor Corporation" generator="IPexpress" date="2025 04 14 19:04:48.630" version="5.8" type="Module" synthesis="synplify" source_format="VHDL">
   <Package>
-		<File name="FIFO40.lpc" type="lpc" modified="2022 12 22 14:01:50.084"/>
-		<File name="FIFO40.vhd" type="top_level_vhdl" modified="2022 12 22 14:01:50.131"/>
-		<File name="FIFO40_tmpl.vhd" type="template_vhdl" modified="2022 12 22 14:01:50.131"/>
-		<File name="tb_FIFO40_tmpl.vhd" type="testbench_vhdl" modified="2022 12 22 14:01:50.147"/>
+		<File name="FIFO40.lpc" type="lpc" modified="2025 04 14 19:04:45.284"/>
+		<File name="FIFO40.vhd" type="top_level_vhdl" modified="2025 04 14 19:04:45.377"/>
+		<File name="FIFO40_tmpl.vhd" type="template_vhdl" modified="2025 04 14 19:04:45.377"/>
+		<File name="tb_FIFO40_tmpl.vhd" type="testbench_vhdl" modified="2025 04 14 19:04:45.377"/>
   </Package>
 </DiamondModule>

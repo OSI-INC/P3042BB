@@ -16,8 +16,8 @@ CoreRevision=5.8
 ModuleName=FIFO40
 SourceFormat=VHDL
 ParameterFileVersion=1.0
-Date=12/22/2022
-Time=14:01:50
+Date=04/14/2025
+Time=19:04:44
 
 [Parameters]
 Verilog=0
@@ -41,7 +41,7 @@ PeAssert=10
 PeDeassert=12
 FullFlg=0
 PfMode=Static - Single Threshold
-PfAssert=508
+PfAssert=2
 PfDeassert=506
 Reset=Async
 Reset1=Sync

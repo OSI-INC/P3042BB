@@ -66,6 +66,7 @@
 
 
 
+
 -- Global constants and types.  
 library ieee;  
 use ieee.std_logic_1164.all;
@@ -1074,26 +1075,24 @@ begin
 	-- The Detector Module Interface watches for MRDY, which indicates
 	-- that one or more detector modules has a message ready for readout
 	-- When it sees MRDY, it asserts Detector Module Read Control (DMRC).
-	-- It then proceeds to read out the five bytes of the detector module
-	-- message using both the rising and falling edges of DSU. This readout
-	-- will be abandoned, however, if the first byte is not a valid ID
-	-- byte. In abandoning the readout, the interface unasserts DMRC and
-	-- the detector module will discard its message. Once the interface
-	-- has acquired five bytes, it stores them as a forty-bit record in the
-	-- Detector Module Buffer (DMB). If one of the detector modules fails, 
-	-- breaking the daisy-chain, the modules upstream of the failure will 
-	-- assert MRDY continuously. Most likely, we will be reading messages
-	-- with ID byte zero, and these we will discard. If, however, the 
-	-- corrupted message read from the faulty module presents a valid ID,
-	-- we will keep reading the same corrupted message and our buffer will
-	-- fill up. We stop writing to the buffer when it is full and keep the 
-	-- detector modules waiting until the buffer is no longer full. The interface
-	-- sets a flag DMIBSY when it is not in its rest state. This flag is available 
-	-- to the CPU in the communications status register. Whe the interface sees 
-	-- Detector Module Configure (DMCFG) asserted, it starts a configuration 
-	-- access, asserting DMRC until DMCFG is unasserted. During this cycle,
-	-- the detector modules will be calculating their position in the daisy
-	-- chain.
+	-- It reads the first byte of the five-byte message from the daisy
+	-- chain bus. If the first four bits of this byte are zero, the 
+	-- interface abandons the read. The detector module must discard the
+	-- message. Once the interface has acquired five bytes, it stores them 
+	-- as a forty-bit record in the Detector Module Buffer (DMB). If one 
+	-- of the detector modules fails, breaking the daisy-chain, the modules 
+	-- upstream of the failure will assert MRDY continuously. Most likely, 
+	-- we will be reading messages with ID byte zero, and these we will 
+	-- discard. If, however, the corrupted message read from the faulty 
+	-- module presents a valid ID, we will keep reading the same corrupted 
+	-- message and our buffer will fill up. We stop writing to the buffer 
+	-- when it is full and keep the detector modules waiting until the buffer 
+	-- is no longer full. The interface sets a flag DMIBSY when it is not in 
+	-- its rest state. This flag is available to the CPU in the communications 
+	-- DMBFULL. Whe the interface sees Detector Module Configure (DMCFG) 
+	-- asserted, it starts a configuration access, asserting DMRC until DMCFG 
+	-- is unasserted. During this cycle, the detector modules will be 
+	-- calculating their position in the daisy chain.
 	Detector_Module_Interface : process (SCK,RESET) is
 	variable state, next_state : integer range 0 to 15;
 	begin
@@ -1491,10 +1490,11 @@ begin
 	-- uses of the test points defined in the comments.
 	
 	-- A pulse during write to main message buffer.
-	TP1 <= tp_reg(0); 
+	--TP1 <= tp_reg(0); 
+	TP1 <= DMBFULL;
 	
 	-- Shows changes in daisy chain data lines.
-	TP2 <= dub(0) xor dub(1) xor dub(2) xor dub(3) 
-		xor dub(4) xor dub(5) xor dub(6) xor dub(7); 
-		
+	-- TP2 <= dub(0) xor dub(1) xor dub(2) xor dub(3) xor dub(4) xor dub(5) xor dub(6) xor dub(7); 
+	TP2 <= DMBRD;
+	
 end behavior;

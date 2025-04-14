@@ -894,8 +894,7 @@ rti
 ; --------------------------------------------------------------
 ; Store the previous message in the message buffer, enable an
 ; activity lamp on the base board, transmit a lamp activity 
-; notification to the display panel. Note that this routine will
-; store any previous message, valid or not.
+; notification to the display panel.
 ; --------------------------------------------------------------
 save_msg_prv:
 
