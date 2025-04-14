@@ -61,11 +61,7 @@
 -- V5.3, 15-AUG-24: Increase drive current of DMCK to 24 mA. Increment hardware version
 -- to 2 to indicate presence of the DMCK Termination Modificaiton. 
 
--- V6.1, 14-APR-25: Accelerate detector module readout. Dedicate TP1 to tp_reg(0) and
--- TP2 to XOR of daisy chain data bus.
-
-
-
+-- V6.1, 14-APR-25: Accelerate detector module readout, now takes 3 us per message. 
 
 -- Global constants and types.  
 library ieee;  
@@ -1489,12 +1485,10 @@ begin
 	-- CPU code for the test point register implementation. We have alternate 
 	-- uses of the test points defined in the comments.
 	
-	-- A pulse during write to main message buffer.
-	--TP1 <= tp_reg(0); 
+	-- Assert when detector module buffer is full.
 	TP1 <= DMBFULL;
-	
-	-- Shows changes in daisy chain data lines.
-	-- TP2 <= dub(0) xor dub(1) xor dub(2) xor dub(3) xor dub(4) xor dub(5) xor dub(6) xor dub(7); 
-	TP2 <= DMBRD;
+
+	-- A pulse during write to main message buffer.
+	TP2 <= tp_reg(0); 
 	
 end behavior;
