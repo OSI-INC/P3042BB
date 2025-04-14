@@ -61,7 +61,7 @@
 -- V5.3, 15-AUG-24: Increase drive current of DMCK to 24 mA. Increment hardware version
 -- to 2 to indicate presence of the DMCK Termination Modificaiton. 
 
--- V5.4, 14-AUG-25: Accelerate detector module readout. Dedicate TP1 to tp_reg(0) and
+-- V6.1, 14-APR-25: Accelerate detector module readout. Dedicate TP1 to tp_reg(0) and
 -- TP2 to XOR of daisy chain data bus.
 
 
@@ -116,7 +116,7 @@ entity main is
 -- Version numbers.
 	constant hardware_id : integer := 42;
 	constant hardware_version : integer := 2;
-	constant firmware_version : integer := 5;
+	constant firmware_version : integer := 6;
 
 -- Configuration of OSR8.
 	constant prog_addr_len : integer := 11;
@@ -1113,32 +1113,48 @@ begin
 				when 0 => 
 					if (DMCFG = '1') then
 						next_state := 15;
+						DMIBSY <= '0';
+						DMRC <= '0'; 
+						DSU <= '0';
 					elsif (MRDY = '0') or (DMBFULL = '1') then 
 						next_state := 0; 
+						DMIBSY <= '0';
+						DMRC <= '0'; 
+						DSU <= '0';
+					else 
+						next_state := 1;
+						DMIBSY <= '1';
+						DMRC <= '1'; 
+						DSU <= '1';
 					end if;
-					DMIBSY <= '0';
-					DMRC <= '0'; DSU <= '0';
 				when 1 => 
-					DMRC <= '1'; DSU <= '0';
-				when 2 => 
-					DMRC <= '1'; DSU <= '1';
-				when 3 => 
-					DMRC <= '1'; DSU <= '0'; dmb_in(39 downto 32) <= dub;
-				when 4 =>
+					DMRC <= '1'; 
+					DSU <= '0'; 
+					dmb_in(39 downto 32) <= dub;
+				when 2 =>
 					if (dmb_in(35 downto 32) = "0000") then
 						next_state := 0;
 					end if;
-					DMRC <= '1'; DSU <= '1'; dmb_in(31 downto 24) <= dub;
-				when 5 =>
-					DMRC <= '1'; DSU <= '0'; dmb_in(23 downto 16) <= dub;
-				when 6 => 
-					DMRC <= '1'; DSU <= '1'; dmb_in(15 downto 8) <= dub;
-				when 7 => 
-					DMRC <= '0'; DSU <= '0'; dmb_in(7 downto 0) <= dub;
+					DMRC <= '1'; 
+					DSU <= '1'; 
+					dmb_in(31 downto 24) <= dub;
+				when 3 =>
+					DMRC <= '1'; 
+					DSU <= '0'; 
+					dmb_in(23 downto 16) <= dub;
+				when 4 => 
+					DMRC <= '1'; 
+					DSU <= '1'; 
+					dmb_in(15 downto 8) <= dub;
+				when 5 => 
+					DMRC <= '0'; 
+					DSU <= '0'; 
+					dmb_in(7 downto 0) <= dub;
 					DMBWR <= '1';
 					next_state := 0;
 				when 15 =>
-					DMRC <= '1'; DSU <= '0';
+					DMRC <= '1'; 
+					DSU <= '0';
 					if (DMCFG = '1') then
 						next_state := 15;
 					else
