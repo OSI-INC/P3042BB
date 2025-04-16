@@ -128,7 +128,7 @@ const msg_pwr_prv 0x0004 ; Previous Message Power
 const msg_an_prv  0x0005 ; Previous Message Antenna Number
 const clock_hi    0x0006 ; Clock HI
 const clock_lo    0x0007 ; Clock LO
-const zero_channel_select 0x0100 ; Base of channel select array
+const main_cntr   0x0008 ; Main Loop Counter
 const zero_channel_timer 0x0200 ; Base of channel timer array
 const zero_index_antenna 0x0300 ; Base of antenna mapping table
 const sp_initial 0x0700 ; Bottom of the stack in RAM.
@@ -167,18 +167,6 @@ ld A,0x00
 ld (irq_mask_addr),A  
 ld A,0xFF              
 ld (irq_reset_addr),A  
-
-; Select all channels for reception by writing ones to their select bits.
-ld A,0xFF
-push A
-pop B
-ld A,0x01
-ld IX,zero_channel_select
-init_channel_select_loop:
-ld (IX),A
-inc IX
-dec B
-jp nz,init_channel_select_loop
 
 ; Set up the detector module index to antenna input mapping. We are
 ; writing an array of constants into memory so that we can use the
@@ -347,10 +335,10 @@ ld (test_point_addr),A
 ; Enable interrupts to start the data acquisition.
 clri
 
-; Clear the main loop counter, which we keep in register E.
-ld A,0
-push A
-pop E
+; Set the main loop counter to one so that all tasks will be executed in first
+; run through the main loop.
+ld A,1
+ld (main_cntr),A
 
 ; Go to the main program.
 jp main
@@ -504,11 +492,12 @@ main_done_messages:
 ; counter is zero, jump to the start of the main loop. Otherwise,
 ; continue with infrequent tasks.
 ; ---------------------------------------------------------------
-dec D
+ld A,(main_cntr)
+dec A
+ld (main_cntr),A
 jp nz,main
 ld A,slow_task_skip
-push A
-pop D
+ld (main_cntr),A
 
 ; ---------------------------------------------------------------
 ; Manage communication with the display panel. We alternate between
@@ -595,63 +584,9 @@ jp nz,stim_cmd
 ; initialization routine, to indicate that the reset is complete.
 ld A,(relay_crlo_addr)
 and A,reset_bit_mask
-jp z,msg_select
+jp z,done_cmd_xmit
 ld (cpu_rst_addr),A
 wait
-
-; Message Select Command. We interpret the command and modify the message
-; selection array accordingly. If this is not a message select command, we
-; ignore the command.
-msg_select:
-ld A,(relay_crlo_addr)
-and A,sel_bit_mask
-jp z,done_cmd_xmit
-
-; Check the message select code.
-ld A,(relay_crhi_addr)
-sub A,select_none_code
-jp z,select_none
-ld A,(relay_crhi_addr)
-sub A,select_all_code
-jp z,select_all
-
-; Set the select bit for this particular channel.
-ld HL,zero_channel_select
-push H
-ld A,(relay_crhi_addr)
-push A
-pop IX
-ld A,0x01
-ld (IX),A
-jp done_cmd_xmit
-
-; For select none, we write a zero to all select bits.
-select_none:
-ld A,0xFF
-push A
-pop B
-ld A,0x00
-ld IX,zero_channel_select
-select_none_loop:
-ld (IX),A
-inc IX
-dec B
-jp nz,select_none_loop
-jp done_cmd_xmit
-
-; For select all, we write a one to all select bits.
-select_all:
-ld IX,zero_channel_select
-ld A,0xFF
-push A
-pop B
-ld A,0x01
-select_all_loop:
-ld (IX),A
-inc IX
-dec B
-jp nz,select_all_loop
-jp done_cmd_xmit
 
 ; If the command is meant for the stimulator, transmit it to the
 ; stimulator through the transmitting feedthrough interface.
@@ -887,10 +822,6 @@ rti
 ; -------------------------------------------------------------
 
 
-; Calling convention: calling process pushes anything it wants
-; protected onto the stack before calling, and pops upon return.
-
-
 ; --------------------------------------------------------------
 ; Store the previous message in the message buffer, enable an
 ; activity lamp on the base board, transmit a lamp activity 
@@ -898,31 +829,11 @@ rti
 ; --------------------------------------------------------------
 save_msg_prv:
 
-; Push all the flags and registers onto the stack so we don't
-; have to worry about which ones we use in the interrupt.
-push F 
-push A
-push H
-push L
-push IX
-
 ; Generate a rising edge on tp_reg(0) to indicate the start of
 ; the message write.
 ld A,(test_point_addr)
 or A,0x01                    
 ld (test_point_addr),A   
-
-; Check that this channel is among those enabled by the channel select
-; array. If not, set the message identifier to the invalid identifier
-; and terminate the readout. 
-ld HL,zero_channel_select
-push H
-ld A,(msg_id_prv)
-push A
-pop IX
-ld A,(IX)
-sub A,0
-jp z,save_prv_done
 
 ; Transmit a message to the display panel. The eight-bit message consists
 ; of an operation code in the top four bits and the lower four bits of the 
@@ -1000,12 +911,7 @@ ld A,(test_point_addr)
 and A,0xFE                
 ld (test_point_addr),A  
 
-; Pop the flags off the stack.
-pop IX
-pop L
-pop H
-pop A
-pop F
+; Return
 ret
 
 ; ------------------------------------------------------------
