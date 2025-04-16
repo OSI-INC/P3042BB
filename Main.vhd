@@ -1486,7 +1486,7 @@ begin
 	-- uses of the test points defined in the comments.
 	
 	-- Assert when detector module buffer is full.
-	TP1 <= DMBFULL;
+	TP1 <= DMBRD;
 
 	-- A pulse during write to main message buffer.
 	TP2 <= tp_reg(0); 
