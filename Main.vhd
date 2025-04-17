@@ -62,6 +62,9 @@
 -- to 2 to indicate presence of the DMCK Termination Modificaiton. 
 
 -- V6.1, 14-APR-25: Accelerate detector module readout, now takes 3 us per message. 
+-- Add Duplicate Selector process, which reads from the Detector Module buffer and
+-- selects the most powerful of consecutive duplicate messages, then stores them in
+-- a Selected Message Buffer for the CPU to read out and store.
 
 -- Global constants and types.  
 library ieee;  
@@ -227,18 +230,18 @@ architecture behavior of main is
 	constant dpcr_addr : integer := 23; -- Display Panel Configuration Request (Write)
 	constant dpod_addr : integer := 24; -- Display Panel Output Data (Write)
 	constant dpid_addr : integer := 25; -- Display Panel Input Data (Read)
-	constant dmb_read_addr : integer := 26; -- Detector Module Buffer Read (Write)
+	constant msb_read_addr : integer := 26; -- Message Selector Buffer Read (Write)
 	constant irq_tmr2_max_addr : integer := 27; -- Timer Two Period Minus One (Read/Write)
 	constant irq_tmr2_addr : integer := 28; -- Timer Two value (Read)
 	constant fv_addr : integer := 29; -- Firmware Version number (Read)
 	constant indicators_addr : integer := 32; -- Indicator lamp array (Write)
 	constant indicator_low : integer := 1; -- Low index of CPU-controlled indicators
 	constant indicator_hi : integer := 15; -- High index of CPU-controlled indicators
-	constant dmb_id_addr : integer := 48; -- Detector Module ID (Read)
-	constant dmb_hi_addr : integer := 49; -- Detector Module HI Data Byte (Read)
-	constant dmb_lo_addr : integer := 50; -- Detector Module LO Data Byte (Read)
-	constant dmb_pwr_addr : integer := 51; -- Detector Module Power (Read)
-	constant dmb_an_addr : integer := 52; -- Detector Module Antenna Number (Read)
+	constant msb_id_addr : integer := 48; -- Selected Message ID (Read)
+	constant msb_hi_addr : integer := 49; -- Selected Message HI Data Byte (Read)
+	constant msb_lo_addr : integer := 50; -- Selected Message LO Data Byte (Read)
+	constant msb_pwr_addr : integer := 51; -- Selected Message Power (Read)
+	constant msb_an_addr : integer := 52; -- Selected Message Antenna Number (Read)
 	constant tf_sr_addr : integer := 53; -- Transmitting Feedthrough Status Register (Read)
 	constant tf_op_addr : integer := 54; -- Transmitting Feedthrough Opcode (Write)
 	constant tf_n_addr : integer := 55; -- Transmitting Feedthrough Operand (Write)
@@ -297,7 +300,15 @@ architecture behavior of main is
 	signal DMBFULL : std_logic; -- Detector Module Buffer Full
 	signal DMIBSY : std_logic; -- Detector Module Interface Busy
 	signal dmb_in, dmb_out : std_logic_vector(39 downto 0);
-		
+	
+-- Message Selector Buffer Interface
+	signal MSBWR : std_logic; -- Message Selector Buffer Write
+	signal MSBRD : std_logic; -- Message Selector Buffer Read
+	signal MSBEMPTY : std_logic; -- Message Selector Buffer Empty
+	signal MSBFULL : std_logic; -- Message Selector Buffer Full
+	signal MSBSY : std_logic; -- Message Selector Busy
+	signal msb_in, msb_out : std_logic_vector(39 downto 0);
+
 -- General-Purpose Constant
 	constant max_data_byte : std_logic_vector(7 downto 0) := "11111111";
 	constant high_z_byte : std_logic_vector(7 downto 0) := "ZZZZZZZZ";
@@ -716,14 +727,15 @@ begin
 		);
 
 -- The Detector Module Buffer is where the Detector Module Reader puts
--- messages for the CPU to read out and subsequently write into the
--- Message Buffer. It is forty bits wide. When it's Empty flag is 
--- not set, a message is ready to read.
+-- messages for the Message Selector to read out and sort through to
+-- reject duplicates that are less powerful than the top antenna message.
+-- It is forty bits wide. When it's Empty flag is not set, a message is 
+-- ready to read.
 	DM_Buffer : entity FIFO40
 		port map (
 			Data => dmb_in,
-			WrClock => not SCK,
-			RdClock => not PCK,
+			WrClock => SCK,
+			RdClock => not SCK,
 			WrEn => DMBWR,
 			RdEn => DMBRD,
 			Reset=> RESET,
@@ -731,6 +743,24 @@ begin
 			Q => dmb_out,
 			Empty => DMBEMPTY,
 			Full => DMBFULL
+		);
+		
+-- The Message Selector Buffer is where the Message Selector puts its
+-- selected messages for the CPU to read out and subsequently write into 
+-- the Message Buffer. It is forty bits wide. When it's Empty flag is 
+-- not set, a message is ready to read.
+	MS_Buffer : entity FIFO40
+		port map (
+			Data => msb_in,
+			WrClock => SCK,
+			RdClock => not PCK,
+			WrEn => MSBWR,
+			RdEn => MSBRD,
+			Reset=> RESET,
+			RPReset => RESET,
+			Q => msb_out,
+			Empty => MSBEMPTY,
+			Full => MSBFULL
 		);
 
 -- The Memory Manager maps eight-bit read and write access to Detector Module 
@@ -784,17 +814,17 @@ begin
 					cpu_data_in(2) <= ETH;
 					cpu_data_in(3) <= to_std_logic(CONFIG);
 					cpu_data_in(4) <= not DPREMPTY;
-					cpu_data_in(5) <= not DMBEMPTY;
-					cpu_data_in(6) <= DMIBSY;
+					cpu_data_in(5) <= not MSBEMPTY;
+					cpu_data_in(6) <= MSBSY;
 					cpu_data_in(7) <= MRDY;
 				when dpid_addr => 
 					cpu_data_in <= dp_in_waiting;
 				when tf_sr_addr => cpu_data_in <= tf_in;
-				when dmb_id_addr => cpu_data_in <= dmb_out(39 downto 32);
-				when dmb_hi_addr => cpu_data_in <= dmb_out(31 downto 24);
-				when dmb_lo_addr => cpu_data_in <= dmb_out(23 downto 16);
-				when dmb_pwr_addr => cpu_data_in <= dmb_out(15 downto 8);
-				when dmb_an_addr => cpu_data_in <= dmb_out(7 downto 0);
+				when msb_id_addr => cpu_data_in <= msb_out(39 downto 32);
+				when msb_hi_addr => cpu_data_in <= msb_out(31 downto 24);
+				when msb_lo_addr => cpu_data_in <= msb_out(23 downto 16);
+				when msb_pwr_addr => cpu_data_in <= msb_out(15 downto 8);
+				when msb_an_addr => cpu_data_in <= msb_out(7 downto 0);
 				when others => cpu_data_in <= max_data_byte;
 			end case;
 		when others =>
@@ -826,7 +856,7 @@ begin
 			DPXWR <= '0';
 			DPRRD <= '0';
 			TFXWR <= '0';
-			DMBRD <= '0';
+			MSBRD <= '0';
 			DPCONFIG <= false;
 			DMCFG <= '0';
 			for i in 1 to 15 loop indicator_control(i) <= '0'; end loop;
@@ -837,7 +867,7 @@ begin
 			DPXWR <= '0';
 			DPRRD <= '0';
 			TFXWR <= '0';
-			DMBRD <= '0';
+			MSBRD <= '0';
 			if MWRACK then MWRS <= false; end if;
 			if CPUDS then 
 				if (top_bits >= cpu_ctrl_base) 
@@ -864,7 +894,7 @@ begin
 							when dpod_addr => if (DPXFULL = '0') then DPXWR <= '1'; end if;
 							when tf_op_addr => tf_out_opcode <= cpu_data_out;
 							when tf_n_addr => if (TFXFULL = '0') then TFXWR <= '1'; end if;
-							when dmb_read_addr => DMBRD <= '1';
+							when msb_read_addr => MSBRD <= '1';
 						end case;
 					end if;
 					if not CPUWR then
@@ -1156,9 +1186,48 @@ begin
 						next_state := 0; 
 					end if;
 				when others =>
-					DMRC <= '0'; DSU <= '0';
+					DMRC <= '0'; 
+					DSU <= '0';
 					next_state := 0;
 			end case;
+			state := next_state;
+		end if;
+	end process;
+	
+	-- The Message Selector reads messages out of the Detector Module
+	-- Buffer and puts them in the Message Selector Buffer. That's all
+	-- this prototype version does. In the long run, it will select
+	-- messages.
+	Message_Selector : process (SCK,RESET) is
+	variable state, next_state : integer range 0 to 15;
+	begin
+		if (RESET = '1') then
+			MSBWR <= '0';
+			msb_in <= (others => '0');
+			state := 0;
+			MSBSY <= '0';
+		elsif rising_edge(SCK) then
+			msb_in <= msb_in;
+			MSBWR <= '0';
+			MSBSY <= '1';
+
+			case state is
+				when 0 =>
+					if (DMBEMPTY = '0') then
+						DMBRD <= '1';
+					else
+						next_state := 0;
+					end if;
+				when 1 =>
+					msb_in <= dmb_out;
+					next_state := 2;
+				when 2 =>
+					MSBWR <= '1';
+					next_state := 0;
+				when others =>
+					next_state := 0;
+			end case;
+			
 			state := next_state;
 		end if;
 	end process;
