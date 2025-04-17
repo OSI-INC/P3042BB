@@ -815,7 +815,7 @@ begin
 					cpu_data_in(3) <= to_std_logic(CONFIG);
 					cpu_data_in(4) <= not DPREMPTY;
 					cpu_data_in(5) <= not MSBEMPTY;
-					cpu_data_in(6) <= MSBSY;
+					cpu_data_in(6) <= DMIBSY;
 					cpu_data_in(7) <= MRDY;
 				when dpid_addr => 
 					cpu_data_in <= dp_in_waiting;
@@ -1102,7 +1102,7 @@ begin
 	-- that one or more detector modules has a message ready for readout
 	-- When it sees MRDY, it asserts Detector Module Read Control (DMRC).
 	-- It reads the first byte of the five-byte message from the daisy
-	-- chain bus. If the first four bits of this byte are zero, the 
+	-- chain bus. If the lower four bits of this byte are zero, the 
 	-- interface abandons the read. The detector module must discard the
 	-- message. Once the interface has acquired five bytes, it stores them 
 	-- as a forty-bit record in the Detector Module Buffer (DMB). If one 
@@ -1199,38 +1199,68 @@ begin
 	-- this prototype version does. In the long run, it will select
 	-- messages.
 	Message_Selector : process (SCK,RESET) is
-	variable state, next_state : integer range 0 to 15;
+	variable state, next_state : integer range 0 to 7;
+	variable msg_prv : std_logic_vector(39 downto 0);
+	constant mss_idle : integer := 0;
+	constant mss_check : integer := 1;
+	constant mss_wrclr : integer := 2;
+	constant mss_wrrpl : integer := 3;
 	begin
 		if (RESET = '1') then
 			MSBWR <= '0';
 			DMBRD <= '0';
 			msb_in <= (others => '0');
-			state := 0;
+			msg_prv := (others => '0');
+			state := mss_idle;
 		elsif rising_edge(SCK) then
 			msb_in <= msb_in;
+			msg_prv := msg_prv;
 			MSBWR <= '0';
 			DMBRD <= '0';
 			
 			next_state := state;
 			case state is
-				when 0 =>
+				when mss_idle =>
 					if (DMBEMPTY = '0') then
 						DMBRD <= '1';
-						next_state := 1;
+						next_state := mss_check;
+					elsif (msg_prv(34 downto 31) /= "0000") 
+						and (MRDY = '0') 
+						and (DMIBSY = '0') then
+						msb_in <= msg_prv;
+						next_state := mss_wrclr;
+					else
+						next_state := mss_idle;
 					end if;
-				when 1 =>
-					msb_in <= dmb_out;
-					next_state := 2;
-				when 2 =>
+				when mss_check =>
+					if (msg_prv(34 downto 31) = "0000") then
+						msg_prv := dmb_out;
+						next_state := mss_idle;
+					elsif (dmb_out(39 downto 16) /= msg_prv(39 downto 16)) then
+						msb_in <= msg_prv;
+						next_state := mss_wrrpl;
+					elsif (to_integer(unsigned(dmb_out(15 downto 8))) <= 
+						to_integer(unsigned(msg_prv(15 downto 8)))) then
+						next_state := mss_idle;
+					else
+						msg_prv := dmb_out;
+						next_state := mss_idle;
+					end if;
+				when mss_wrclr =>
 					MSBWR <= '1';
-					next_state := 0;
+					msg_prv := (others => '0');
+					next_state := mss_idle;
+				when mss_wrrpl => 
+					MSBWR <= '1';
+					msg_prv := dmb_out;
+					next_state := mss_idle;
 				when others =>
-					next_state := 0;
+					next_state := mss_idle;
 			end case;
 			state := next_state;
 		end if;
 		
-		MSBSY <= to_std_logic(state /= 0);
+		MSBSY <= to_std_logic(state /= mss_idle);
 	end process;
 	
 	-- The Lamp Inhibitor looks at the HIDE switch and turns on or off
@@ -1556,7 +1586,7 @@ begin
 	-- uses of the test points defined in the comments.
 	
 	-- Assert when detector module buffer is full.
-	TP1 <= DMBRD;
+	TP1 <= MSBSY;
 
 	-- A pulse during write to main message buffer.
 	TP2 <= tp_reg(0); 
