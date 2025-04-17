@@ -1203,20 +1203,20 @@ begin
 	begin
 		if (RESET = '1') then
 			MSBWR <= '0';
+			DMBRD <= '0';
 			msb_in <= (others => '0');
 			state := 0;
-			MSBSY <= '0';
 		elsif rising_edge(SCK) then
 			msb_in <= msb_in;
 			MSBWR <= '0';
-			MSBSY <= '1';
-
+			DMBRD <= '0';
+			
+			next_state := state;
 			case state is
 				when 0 =>
 					if (DMBEMPTY = '0') then
 						DMBRD <= '1';
-					else
-						next_state := 0;
+						next_state := 1;
 					end if;
 				when 1 =>
 					msb_in <= dmb_out;
@@ -1227,9 +1227,10 @@ begin
 				when others =>
 					next_state := 0;
 			end case;
-			
 			state := next_state;
 		end if;
+		
+		MSBSY <= to_std_logic(state /= 0);
 	end process;
 	
 	-- The Lamp Inhibitor looks at the HIDE switch and turns on or off
