@@ -734,7 +734,7 @@ begin
 	DM_Buffer : entity FIFO40
 		port map (
 			Data => dmb_in,
-			WrClock => SCK,
+			WrClock => not SCK,
 			RdClock => not SCK,
 			WrEn => DMBWR,
 			RdEn => DMBRD,
@@ -752,7 +752,7 @@ begin
 	MS_Buffer : entity FIFO40
 		port map (
 			Data => msb_in,
-			WrClock => SCK,
+			WrClock => not SCK,
 			RdClock => not PCK,
 			WrEn => MSBWR,
 			RdEn => MSBRD,
@@ -1120,7 +1120,7 @@ begin
 	-- is unasserted. During this cycle, the detector modules will be 
 	-- calculating their position in the daisy chain.
 	Detector_Module_Interface : process (SCK,RESET) is
-	variable state, next_state : integer range 0 to 15;
+	variable state, next_state : integer range 0 to 7;
 	begin
 		if (RESET = '1') then
 			DMBWR <= '0';
@@ -1130,25 +1130,23 @@ begin
 			DSU <= '0';
 			DMIBSY <= '0';
 		elsif rising_edge(SCK) then
-			next_state := state + 1;
+			next_state := 0;
 			dmb_in <= dmb_in;
 			DMBWR <= '0';
 			DMIBSY <= '1';
 			case state is
 				when 0 => 
 					if (DMCFG = '1') then
-						next_state := 15;
+						next_state := 7;
 						DMIBSY <= '0';
 						DMRC <= '0'; 
 						DSU <= '0';
 					elsif (MRDY = '0') or (DMBFULL = '1') then 
-						next_state := 0; 
 						DMIBSY <= '0';
 						DMRC <= '0'; 
 						DSU <= '0';
 					else 
 						next_state := 1;
-						DMIBSY <= '1';
 						DMRC <= '1'; 
 						DSU <= '1';
 					end if;
@@ -1156,6 +1154,7 @@ begin
 					DMRC <= '1'; 
 					DSU <= '0'; 
 					dmb_in(39 downto 32) <= dub;
+					next_state := 2;
 				when 2 =>
 					if (dmb_in(35 downto 32) = "0000") then
 						next_state := 0;
@@ -1163,41 +1162,39 @@ begin
 					DMRC <= '1'; 
 					DSU <= '1'; 
 					dmb_in(31 downto 24) <= dub;
+					next_state := 3;
 				when 3 =>
 					DMRC <= '1'; 
 					DSU <= '0'; 
 					dmb_in(23 downto 16) <= dub;
+					next_state := 4;
 				when 4 => 
 					DMRC <= '1'; 
 					DSU <= '1'; 
 					dmb_in(15 downto 8) <= dub;
+					next_state := 5;
 				when 5 => 
 					DMRC <= '0'; 
 					DSU <= '0'; 
 					dmb_in(7 downto 0) <= dub;
 					DMBWR <= '1';
-					next_state := 0;
-				when 15 =>
+				when 7 =>
 					DMRC <= '1'; 
 					DSU <= '0';
 					if (DMCFG = '1') then
 						next_state := 15;
-					else
-						next_state := 0; 
 					end if;
 				when others =>
 					DMRC <= '0'; 
 					DSU <= '0';
-					next_state := 0;
 			end case;
 			state := next_state;
 		end if;
 	end process;
 	
 	-- The Message Selector reads messages out of the Detector Module
-	-- Buffer and puts them in the Message Selector Buffer. That's all
-	-- this prototype version does. In the long run, it will select
-	-- messages.
+	-- Buffer, eliminates consecutive duplicates, and stores the top
+	-- antenna messages in the Message Selector Buffer. 
 	Message_Selector : process (SCK,RESET) is
 	variable state, next_state : integer range 0 to 7;
 	variable msg_prv : std_logic_vector(39 downto 0);
@@ -1224,7 +1221,7 @@ begin
 					if (DMBEMPTY = '0') then
 						DMBRD <= '1';
 						next_state := mss_check;
-					elsif (msg_prv(34 downto 31) /= "0000") 
+					elsif (msg_prv(35 downto 32) /= "0000") 
 						and (MRDY = '0') 
 						and (DMIBSY = '0') then
 						msb_in <= msg_prv;
@@ -1233,7 +1230,7 @@ begin
 						next_state := mss_idle;
 					end if;
 				when mss_check =>
-					if (msg_prv(34 downto 31) = "0000") then
+					if (msg_prv(35 downto 32) = "0000") then
 						msg_prv := dmb_out;
 						next_state := mss_idle;
 					elsif (dmb_out(39 downto 16) /= msg_prv(39 downto 16)) then
@@ -1586,9 +1583,8 @@ begin
 	-- uses of the test points defined in the comments.
 	
 	-- Assert when detector module buffer is full.
-	TP1 <= MSBSY;
+	TP1 <= DMBWR;
 
 	-- A pulse during write to main message buffer.
-	TP2 <= tp_reg(0); 
-	
+	TP2 <= DMIBSY;
 end behavior;

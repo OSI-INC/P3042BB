@@ -121,17 +121,12 @@ const clock_id 0x00 ; Clock message identifier.
 const invalid_id 0xF0 ; Invalid message identifier
 
 ; Variable, Constant, Array, and Stack Locations.
-const msg_id_prv  0x0001 ; Previous Message Identifier
-const msg_hi_prv  0x0002 ; Previous Message Data, HI
-const msg_lo_prv  0x0003 ; Previous Message Data, LO
-const msg_pwr_prv 0x0004 ; Previous Message Power
-const msg_an_prv  0x0005 ; Previous Message Antenna Number
-const clock_hi    0x0006 ; Clock HI
-const clock_lo    0x0007 ; Clock LO
-const main_cntr   0x0008 ; Main Loop Counter
+const clock_hi    0x0001 ; Clock HI
+const clock_lo    0x0002 ; Clock LO
+const main_cntr   0x0003 ; Main Loop Counter
 const zero_channel_timer 0x0200 ; Base of channel timer array
 const zero_index_antenna 0x0300 ; Base of antenna mapping table
-const sp_initial 0x0700 ; Bottom of the stack in RAM.
+const sp_initial 0x0700 ; Bottom of the stack.
 
 ; ------------------------------------------------------------
 ;                         START
@@ -221,16 +216,6 @@ ld (IX),A
 inc IX
 ld A,index_16
 ld (IX),A
-
-; Clear the previous message, setting its ID to invalid_id and its other
-; records to zero.
-ld A,invalid_id
-ld (msg_id_prv),A
-ld A,0x00
-ld (msg_hi_prv),A
-ld (msg_lo_prv),A
-ld (msg_pwr_prv),A
-ld (msg_an_prv),A
 
 ; Flash the indicators on the base board. We set all the indicator counters to the 
 ; flash_linger value and so turn on the indicators for flash_linger timer interrupt 
@@ -349,142 +334,108 @@ jp main
 main:
 
 ; ---------------------------------------------------------------
-; The main loop handles message readout from the detector modules,
-; elimination of duplicates, and storage of these messages in the
-; message buffer. Each time we run through the main loop, we will
-; either do nothing, if no message is waiting, or read a message
-; and set it aside, or write a previous message to the buffer. See
-; diagram "Message Handler" in A3042 documentation for states.
+; Read any available message from the Message Selector Buffer. 
+; These messages arrive in the buffer after the Message Selector
+; state machine has performed its duplicate elimination. We read
+; a new message, send a notification to the display panel, update
+; the channel indicator timer, swap the daisy chain identifier for
+; an antenna connector number, and write the message with the 
+; swapped antenna number to the main message buffer.
 ; ---------------------------------------------------------------
 
 ; Check the Detector Module Buffer Ready (DMBRDY) flag. If it's not 
-; set, we skip message reading. 9CK
+; set, we skip message reading.
 ld A,(comm_status_addr)
 and A,dmbrdy_bit_mask
 jp z,main_no_msg
 
+; Generate a rising edge on tp_reg(0) to indicate the start of
+; message handling.
+ld A,(test_point_addr)
+or A,0x01                    
+ld (test_point_addr),A   
+
 ; Read the new message out of the message buffer. The new message
 ; will be available in the dmb location immediately after we write
-; to the Detector Module Buffer Read location. The message buffer 
-; guarantees that the message ID is valid before storing in the 
-; buffer. 3CK
+; to the Detector Module Buffer Read location.
 ld (dmb_read_addr),A
 
-; Check if the new message has the same ID as our previous message. If 
-; not, we jump to main_new_msg. 14CK
+; Transmit a notification to the display panel. The eight-bit notification 
+; consists of an operation code in the top four bits and the lower four 
+; bits of the message identifier. 
 ld A,(dmb_id_addr)
-push A
-pop B
-ld A,(msg_id_prv)
-sub A,B
-jp nz,main_new_msg
-
-; Check if the new message has the same high byte as our previous
-; message. If not, we jump to main_new_msg. 14CK
-ld A,(dmb_hi_addr)
-push A
-pop B
-ld A,(msg_hi_prv)
-sub A,B
-jp nz,main_new_msg
-
-; Check if the new message has the same lo byte as our previous
-; message. If not, we jump to main_new_msg. 14CK
-ld A,(dmb_lo_addr)
-push A
-pop B
-ld A,(msg_lo_prv)
-sub A,B
-jp nz,main_new_msg
-
-; Check to see if the previous message has power equal to or greater
-; than the new message. If so, we ignore the new message. We are 
-; rejecting duplicates in our effort to fine the top antenna. 12CK
-ld A,(dmb_pwr_addr)
-push A
-pop B
-ld A,(msg_pwr_prv)
-sub A,B
-jp nc,main_done_messages
-
-; With the new message having greater power, we are going to over-
-; write the previous message. 3CK
-jp main_overwrite_prv
-
-; Check to see if the previous message is valid. If not, we don't
-; save it, but just overwrite it with the new message. A valid ID
-; is one that contains at least one non-zero bit after being masked
-; by the valid_id_mask.
-main_new_msg:
-ld A,(msg_id_prv)
 and A,valid_id_mask
-jp z,main_overwrite_prv
+or A,dp_opcode_msg
+ld (dpod_addr),A
 
-; Our previous message ID is valid and different from our new message ID, so
-; we store the previous message before overwriting it with the new message.
-; The previous message may not be the top antenna message for its channel. 
-; We may have several transmitters colliding, with messages coming in from 
-; all of them, alternating between channels as we read out the detector 
-; modules. Such collisions result in multiple messages from the same 
-; channel being written to the message buffer, alternating with messages
-; from other channels. These duplicates will be removed later, when the 
-; Neuroplayer applies our lwdaq_receiver routine to the data. Collisions are,
-; however, rare. Most of the time, the message we store is the top antenna
-; message.
-call save_msg_prv
-
-; Overwrite the previous message with the new message. Our new message has
-; become the previous message, so we jump to main_done_message. 38CK
-main_overwrite_prv:
+; Reset the channel indicator timer. We use the lower four bits of
+; the channel ID to select one of the fifteen indicator lamps.
+ld HL,zero_channel_timer
+push H
 ld A,(dmb_id_addr)
-ld (msg_id_prv),A
-ld A,(dmb_hi_addr)
-ld (msg_hi_prv),A
-ld A,(dmb_lo_addr)
-ld (msg_lo_prv),A
-ld A,(dmb_pwr_addr)
-ld (msg_pwr_prv),A
+and A,valid_id_mask
+push A
+pop IX
+ld A,activity_linger
+ld (IX),A
+
+; Swap the daisy chain index, which we have so far been using as
+; our antenna number, for the antenna input number on the TC
+; enclosure. During initialization, we set up a table specifying
+; the mapping from index to antenna. We use that table now. We
+; stash the antenna socket number in a register.
+ld HL,zero_index_antenna
+push H
 ld A,(dmb_an_addr)
-ld (msg_an_prv),A
-jp main_done_messages
+push A
+pop IX
+ld A,(IX)
+push A
+pop C
 
-; No new message is available to be read out. If our previous message
-; is valid, now might be the time to store it. 
-main_no_msg:
-ld A,(msg_id_prv)
-and A,valid_id_mask
-jp z,main_done_messages
+; Store the message in the buffer. We disable interrupts during the write
+; so that we do not collide with the timestamp interrupt's writing of 
+; clock messages to the same buffer. We pay particular attention to the
+; value of the timestamp. While we were reading out the detector modules, 
+; the timestamp may have incremented from 255 to 0 or 1, without any 
+; opportunity to store a clock message in the buffer. The timer interrupt 
+; bit will be set if and only if the timestamp has incremented without a 
+; clock message being stored, so we check this bit, and if it is set, we 
+; store 255 for the timestamp rather than the current value of the interrupt 
+; timer. We do not need to add any "nop" instructions between writes to
+; the message buffer because we have at least one "ld A,(nn)" between each
+; write, and these take four clock cycles.
+seti
+ld A,(dmb_id_addr)
+ld (msg_write_addr),A
+ld A,(dmb_hi_addr)
+ld (msg_write_addr),A
+ld A,(dmb_lo_addr)
+ld (msg_write_addr),A
+ld A,(irq_bits_addr)
+and A,0x01
+jp z,save_msg_ts
+ld A,255
+jp save_msg_stts
+save_msg_ts:
+ld A,(irq_tmr1_addr)
+save_msg_stts:
+ld (msg_write_addr),A
+ld A,(dmb_pwr_addr)
+ld (msg_write_addr),A
+push C
+pop A
+ld (msg_write_addr),A
+clri
 
-; Our interface buffer is empty, now check to see if any detector
-; module has yet to be read out. If so, we won't store the previous 
-; message.
-ld A,(comm_status_addr)
-and A,mrdy_bit_mask
-jp nz,main_done_messages
-
-; Our interface buffer is empty, no detector module is asserting MRDY,
-; but the Detector Module Interface may still be reading out the final 
-; message in the current burst. We check the DMBBUSY bit.
-ld A,(comm_status_addr)
-and A,dmibsy_bit_mask
-jp nz,main_done_messages
-
-; One last check: a new message may now be available in the interface
-; buffer, as a result of the time taken to check the previous message
-; ID, the MRDY flag, and the DMBBUSY flag. So check the DMBRDY flag
-; one more time. If it's set, don't save the previous message.
-ld A,(comm_status_addr)
-and A,dmbrdy_bit_mask
-jp nz,main_done_messages
-
-; The interface is not busy, there are no messages in the buffer, 
-; and there are none in the detector modules. We have a valid 
-; previous message and the current burst is over. It is time to
-; save the previous message.
-call save_msg_prv
-
+; Generate a falling edge on tp_reg(0) to indicate the message write
+; is done.
+ld A,(test_point_addr)
+and A,0xFE                
+ld (test_point_addr),A 
+ 
 ; Done with message handling.
-main_done_messages:
+main_no_msg:
 
 ; ---------------------------------------------------------------
 ; Decrement the main loop counter, which we use to manage tasks 
@@ -821,98 +772,6 @@ rti
 ;                        SUBROUTINES
 ; -------------------------------------------------------------
 
-
-; --------------------------------------------------------------
-; Store the previous message in the message buffer, enable an
-; activity lamp on the base board, transmit a lamp activity 
-; notification to the display panel.
-; --------------------------------------------------------------
-save_msg_prv:
-
-; Generate a rising edge on tp_reg(0) to indicate the start of
-; the message write.
-ld A,(test_point_addr)
-or A,0x01                    
-ld (test_point_addr),A   
-
-; Transmit a message to the display panel. The eight-bit message consists
-; of an operation code in the top four bits and the lower four bits of the 
-; message identifier. 
-ld A,(msg_id_prv)
-and A,valid_id_mask
-or A,dp_opcode_msg
-ld (dpod_addr),A
-
-; Set the channel indicator timer. We use the lower four bits of
-; the channel ID to select one of the fifteen indicator lamps.
-ld HL,zero_channel_timer
-push H
-ld A,(msg_id_prv)
-and A,valid_id_mask
-push A
-pop IX
-ld A,activity_linger
-ld (IX),A
-
-; Swap the daisy chain index, which we have so far been using as
-; our antenna number, for the antenna input number on the TC
-; enclosure. During initialization, we set up a table specifying
-; the mapping from index to antenna. We use that table now.
-ld HL,zero_index_antenna
-push H
-ld A,(msg_an_prv)
-push A
-pop IX
-ld A,(IX)
-ld (msg_an_prv),A
-
-; Store the message in the buffer. We disable interrupts during the write
-; so that we do not conflict with the timestamp interrupt's writing of 
-; clock messages to the same buffer. We pay particular attention to the
-; value of the timestamp. While we were reading out the detector modules, 
-; the timestamp may have incremented from 255 to 0 or 1, without any 
-; opportunity to store a clock message in the buffer. The timer interrupt 
-; bit will be set if and only if the timestamp has incremented without a 
-; clock message being stored, so we check this bit, and if it is set, we 
-; store 255 for the timestamp rather than the current value of the interrupt 
-; timer. We do not need to add any "nop" instructions between writes to
-; the message buffer because we have at least one "ld A,(nn)" between each
-; write, and these take four clock cycles.
-seti
-ld A,(msg_id_prv)
-ld (msg_write_addr),A
-ld A,(msg_hi_prv)
-ld (msg_write_addr),A
-ld A,(msg_lo_prv)
-ld (msg_write_addr),A
-ld A,(irq_bits_addr)
-and A,0x01
-jp z,save_prv_ts
-ld A,255
-jp save_prv_stts
-save_prv_ts:
-ld A,(irq_tmr1_addr)
-save_prv_stts:
-ld (msg_write_addr),A
-ld A,(msg_pwr_prv)
-ld (msg_write_addr),A
-ld A,(msg_an_prv)
-ld (msg_write_addr),A
-clri
-
-; Set the previous message ID to invalid_id to mark it as written. 
-save_prv_done:
-ld A,invalid_id
-ld (msg_id_prv),A
-
-; Generate a falling edge on tp_reg(0) to indicate the message write
-; is done.
-ld A,(test_point_addr)
-and A,0xFE                
-ld (test_point_addr),A  
-
-; Return
-ret
 
 ; ------------------------------------------------------------
 ;                       END
