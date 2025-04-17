@@ -110,7 +110,7 @@ entity main is
 		TX : out std_logic; -- Transmitting Feedthrough Transmit
 		RX : in std_logic; -- Transmitting Feedthrough Receive
 		
-		TP1, TP2 : out std_logic -- Test Point Register
+		TP1, TP2 : out std_logic -- Test Points
 	);	
 
 -- Version numbers.
@@ -1121,72 +1121,88 @@ begin
 	-- calculating their position in the daisy chain.
 	Detector_Module_Interface : process (SCK,RESET) is
 	variable state, next_state : integer range 0 to 7;
+	constant dmi_idle : integer := 0;
+	constant dmi_id : integer := 1;
+	constant dmi_hi : integer := 2;
+	constant dmi_lo : integer := 3;
+	constant dmi_pwr : integer := 4;
+	constant dmi_an : integer := 5;
+	constant dmi_config : integer := 6;	
 	begin
 		if (RESET = '1') then
 			DMBWR <= '0';
 			dmb_in <= (others => '0');
-			state := 0;
+			state := dmi_idle;
 			DMRC <= '0';
 			DSU <= '0';
 			DMIBSY <= '0';
 		elsif rising_edge(SCK) then
-			next_state := 0;
 			dmb_in <= dmb_in;
 			DMBWR <= '0';
 			DMIBSY <= '1';
+
+			next_state := state;
 			case state is
-				when 0 => 
+				when dmi_idle => 
 					if (DMCFG = '1') then
-						next_state := 7;
 						DMIBSY <= '0';
 						DMRC <= '0'; 
 						DSU <= '0';
+						next_state := dmi_config;
 					elsif (MRDY = '0') or (DMBFULL = '1') then 
 						DMIBSY <= '0';
 						DMRC <= '0'; 
 						DSU <= '0';
+						next_state := dmi_idle;
 					else 
-						next_state := 1;
 						DMRC <= '1'; 
 						DSU <= '1';
+						next_state := dmi_id;
 					end if;
-				when 1 => 
+				when dmi_id => 
 					DMRC <= '1'; 
 					DSU <= '0'; 
 					dmb_in(39 downto 32) <= dub;
 					next_state := 2;
-				when 2 =>
+				when dmi_hi =>
 					if (dmb_in(35 downto 32) = "0000") then
-						next_state := 0;
+						DMRC <= '0';
+						DSU <= '0';
+						next_state := dmi_idle;
+					else
+						DMRC <= '1'; 
+						DSU <= '1'; 
+						dmb_in(31 downto 24) <= dub;
+						next_state := dmi_lo;
 					end if;
-					DMRC <= '1'; 
-					DSU <= '1'; 
-					dmb_in(31 downto 24) <= dub;
-					next_state := 3;
-				when 3 =>
+				when dmi_lo =>
 					DMRC <= '1'; 
 					DSU <= '0'; 
 					dmb_in(23 downto 16) <= dub;
-					next_state := 4;
-				when 4 => 
+					next_state := dmi_pwr;
+				when dmi_pwr => 
 					DMRC <= '1'; 
 					DSU <= '1'; 
 					dmb_in(15 downto 8) <= dub;
-					next_state := 5;
-				when 5 => 
+					next_state := dmi_an;
+				when dmi_an => 
 					DMRC <= '0'; 
 					DSU <= '0'; 
 					dmb_in(7 downto 0) <= dub;
 					DMBWR <= '1';
-				when 7 =>
+					next_state := dmi_idle;
+				when dmi_config =>
 					DMRC <= '1'; 
 					DSU <= '0';
 					if (DMCFG = '1') then
-						next_state := 15;
+						next_state := dmi_config;
+					else
+						next_state := dmi_idle;
 					end if;
 				when others =>
 					DMRC <= '0'; 
 					DSU <= '0';
+					next_state := 0;
 			end case;
 			state := next_state;
 		end if;
@@ -1578,13 +1594,27 @@ begin
 	EGRN <= '1';
 	EYLW <= to_std_logic(ETH = '0');
 	
-	-- Test points. We try to keep their descriptions up to date, but check the
-	-- CPU code for the test point register implementation. We have alternate 
-	-- uses of the test points defined in the comments.
+	-- Test points. We change these so much that we don't bother putting 
+	-- their functions in the top comments.	
+	Test_Points : process (CONFIG, HIDE, SHOW) is
+	begin
+		if SHOW then
+			if HIDE then
+				TP1 <= DMBWR;
+				TP2 <= DMIBSY;
+			else
+				TP1 <= MSBWR;
+				TP2 <= MSBSY;
+			end if;
+		else 
+			if HIDE then
+				TP1 <= DMBRD;
+				TP2 <= MSBRD;
+			else
+				TP1 <= tp_reg(0);
+				TP2 <= tp_reg(1);
+			end if;
+		end if;
+	end process;
 	
-	-- Assert when detector module buffer is full.
-	TP1 <= DMBWR;
-
-	-- A pulse during write to main message buffer.
-	TP2 <= DMIBSY;
 end behavior;
