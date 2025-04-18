@@ -64,7 +64,8 @@
 -- V6.1, 14-APR-25: Accelerate detector module readout, now takes 3 us per message. 
 -- Add Duplicate Selector process, which reads from the Detector Module buffer and
 -- selects the most powerful of consecutive duplicate messages, then stores them in
--- a Selected Message Buffer for the CPU to read out and store.
+-- a Selected Message Buffer for the CPU to read out and store. We enhance our test
+-- test point outputs by using the HIDE and SHOW buttons to select signals.
 
 -- Global constants and types.  
 library ieee;  
@@ -1120,14 +1121,16 @@ begin
 	-- is unasserted. During this cycle, the detector modules will be 
 	-- calculating their position in the daisy chain.
 	Detector_Module_Interface : process (SCK,RESET) is
-	variable state, next_state : integer range 0 to 7;
+	variable state, next_state : integer range 0 to 15;
 	constant dmi_idle : integer := 0;
 	constant dmi_id : integer := 1;
 	constant dmi_hi : integer := 2;
 	constant dmi_lo : integer := 3;
 	constant dmi_pwr : integer := 4;
 	constant dmi_an : integer := 5;
-	constant dmi_config : integer := 6;	
+	constant dmi_w1 : integer := 6;
+	constant dmi_w2 : integer := 7;
+	constant dmi_config : integer := 15;	
 	begin
 		if (RESET = '1') then
 			DMBWR <= '0';
@@ -1145,7 +1148,6 @@ begin
 			case state is
 				when dmi_idle => 
 					if (DMCFG = '1') then
-						DMIBSY <= '0';
 						DMRC <= '0'; 
 						DSU <= '0';
 						next_state := dmi_config;
@@ -1190,6 +1192,10 @@ begin
 					DSU <= '0'; 
 					dmb_in(7 downto 0) <= dub;
 					DMBWR <= '1';
+					next_state := dmi_w1;
+				when dmi_w1 =>
+					next_state := dmi_w2;
+				when dmi_w2 => 
 					next_state := dmi_idle;
 				when dmi_config =>
 					DMRC <= '1'; 
@@ -1218,6 +1224,7 @@ begin
 	constant mss_check : integer := 1;
 	constant mss_wrclr : integer := 2;
 	constant mss_wrrpl : integer := 3;
+	variable delay_cnt : integer range 0 to 7;
 	begin
 		if (RESET = '1') then
 			MSBWR <= '0';
@@ -1225,11 +1232,13 @@ begin
 			msb_in <= (others => '0');
 			msg_prv := (others => '0');
 			state := mss_idle;
+			delay_cnt := 0;
 		elsif rising_edge(SCK) then
 			msb_in <= msb_in;
 			msg_prv := msg_prv;
 			MSBWR <= '0';
 			DMBRD <= '0';
+			delay_cnt := 0;
 			
 			next_state := state;
 			case state is
@@ -1238,8 +1247,8 @@ begin
 						DMBRD <= '1';
 						next_state := mss_check;
 					elsif (msg_prv(35 downto 32) /= "0000") 
-						and (MRDY = '0') 
-						and (DMIBSY = '0') then
+							and (MRDY = '0') 
+							and (DMIBSY = '0') then
 						msb_in <= msg_prv;
 						next_state := mss_wrclr;
 					else
@@ -1594,25 +1603,25 @@ begin
 	EGRN <= '1';
 	EYLW <= to_std_logic(ETH = '0');
 	
-	-- Test points. We change these so much that we don't bother putting 
-	-- their functions in the top comments.	
+	-- Test points. We use the HIDE and SHOW buttons to give us a larger
+	-- selection of test signals.	
 	Test_Points : process (CONFIG, HIDE, SHOW) is
 	begin
-		if SHOW then
-			if HIDE then
+		if not SHOW then
+			if not HIDE then
 				TP1 <= DMBWR;
 				TP2 <= DMIBSY;
 			else
-				TP1 <= MSBWR;
-				TP2 <= MSBSY;
+				TP1 <= not DMBEMPTY;
+				TP2 <= DMBRD;
 			end if;
 		else 
-			if HIDE then
-				TP1 <= DMBRD;
-				TP2 <= MSBRD;
+			if not HIDE then
+				TP1 <= MSBWR;
+				TP2 <= MSBSY;
 			else
 				TP1 <= tp_reg(0);
-				TP2 <= tp_reg(1);
+				TP2 <= MSBRD;
 			end if;
 		end if;
 	end process;
