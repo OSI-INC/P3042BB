@@ -1106,20 +1106,30 @@ begin
 	-- chain bus. If the lower four bits of this byte are zero, the 
 	-- interface abandons the read. The detector module must discard the
 	-- message. Once the interface has acquired five bytes, it stores them 
-	-- as a forty-bit record in the Detector Module Buffer (DMB). If one 
-	-- of the detector modules fails, breaking the daisy-chain, the modules 
-	-- upstream of the failure will assert MRDY continuously. Most likely, 
-	-- we will be reading messages with ID byte zero, and these we will 
-	-- discard. If, however, the corrupted message read from the faulty 
-	-- module presents a valid ID, we will keep reading the same corrupted 
-	-- message and our buffer will fill up. We stop writing to the buffer 
-	-- when it is full and keep the detector modules waiting until the buffer 
-	-- is no longer full. The interface sets a flag DMIBSY when it is not in 
-	-- its rest state. This flag is available to the CPU in the communications 
-	-- DMBFULL. Whe the interface sees Detector Module Configure (DMCFG) 
-	-- asserted, it starts a configuration access, asserting DMRC until DMCFG 
-	-- is unasserted. During this cycle, the detector modules will be 
-	-- calculating their position in the daisy chain.
+	-- as a forty-bit record in the Detector Module Buffer (DMB). After
+	-- storing the record, the interface returns to its rest state only
+	-- if MRDY is asserted or if the buffer's empty flag has cleared. 
+	-- The Message Selector, which reads bytes from the buffer, assumes
+	-- that if MRDY is unsasserted and the buffer's empty flag is set,
+	-- then no further messages are imminent, so it will store the copy
+	-- it has been saving. But it turns out that the empty flag will not
+	-- be cleared until two and a half SCK periods after the interface
+	-- writes to the buffer. Thus we introduce a delay of up to four SCK
+	-- periods, waiting for the empty flag to clear. We won't wait forever
+	-- because we want to avoid a state machine that can get caught in
+	-- a loop. If one of the detector modules fails, breaking the 
+	-- daisy-chain, the modules upstream of the failure will assert 
+	-- MRDY continuously because their messages are not being read. 
+	-- Most likely, we will be reading messages with ID byte zero, and 
+	-- these we will discard. If, however, the corrupted message read 
+	-- from the faulty module presents a valid ID, we will keep reading 
+	-- the same corrupted message and our buffer will fill up. We stop 
+	-- writing to the buffer when it is full and keep the detector modules 
+	-- waiting until the buffer is no longer full. When the interface sees 
+	-- Detector Module Configure (DMCFG) asserted, it starts a configuration 
+	-- access, asserting DMRC until DMCFG is unasserted. During this cycle, 
+	-- the detector modules will be calculating their position in the daisy 
+	-- chain.
 	Detector_Module_Interface : process (SCK,RESET) is
 	variable state, next_state : integer range 0 to 15;
 	constant dmi_idle : integer := 0;
@@ -1130,6 +1140,8 @@ begin
 	constant dmi_an : integer := 5;
 	constant dmi_w1 : integer := 6;
 	constant dmi_w2 : integer := 7;
+	constant dmi_w3 : integer := 8;
+	constant dmi_w4 : integer := 9;
 	constant dmi_config : integer := 15;	
 	begin
 		if (RESET = '1') then
@@ -1192,10 +1204,30 @@ begin
 					DSU <= '0'; 
 					dmb_in(7 downto 0) <= dub;
 					DMBWR <= '1';
-					next_state := dmi_w1;
+					if (MRDY = '1') or (DMBEMPTY = '0')then
+						next_state := dmi_idle;
+					else
+						next_state := dmi_w1;
+					end if;
 				when dmi_w1 =>
-					next_state := dmi_w2;
+					if (MRDY = '1') or (DMBEMPTY = '0')then
+						next_state := dmi_idle;
+					else
+						next_state := dmi_w2;
+					end if;
 				when dmi_w2 => 
+					if (MRDY = '1') or (DMBEMPTY = '0')then
+						next_state := dmi_idle;
+					else
+						next_state := dmi_w3;
+					end if;
+				when dmi_w3 => 
+					if (MRDY = '1') or (DMBEMPTY = '0')then
+						next_state := dmi_idle;
+					else
+						next_state := dmi_w4;
+					end if;
+				when dmi_w4 => 
 					next_state := dmi_idle;
 				when dmi_config =>
 					DMRC <= '1'; 
@@ -1216,7 +1248,20 @@ begin
 	
 	-- The Message Selector reads messages out of the Detector Module
 	-- Buffer, eliminates consecutive duplicates, and stores the top
-	-- antenna messages in the Message Selector Buffer. 
+	-- antenna messages in the Message Selector Buffer. As messages 
+	-- become available in the Detector Module Buffer, the selector 
+	-- reads them out and compares them to its previous message. If
+	-- If the new message is from a different identifier, or has a
+	-- different sample value, the selector stores the previous message
+	-- in its own buffer. The absence of a previous message we indicate
+	-- by setting the previous message record to all zeros. If the
+	-- new message has the same identifier and sample value, the
+	-- selector checks its power. If the new message is more powerful
+	-- the selector overwrites the previous message. Otherwise it
+	-- discards the new message. When the Detector Module Buffer is
+	-- empty, and MRDY is not asserted, the selector assumes that no
+	-- further duplicates of its previous message are going to appear,
+	-- so it stores its previous message.
 	Message_Selector : process (SCK,RESET) is
 	variable state, next_state : integer range 0 to 7;
 	variable msg_prv : std_logic_vector(39 downto 0);
