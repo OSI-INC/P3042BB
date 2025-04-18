@@ -16,8 +16,8 @@ CoreRevision=5.8
 ModuleName=FIFO40
 SourceFormat=VHDL
 ParameterFileVersion=1.0
-Date=04/14/2025
-Time=19:04:44
+Date=04/18/2025
+Time=16:27:35
 
 [Parameters]
 Verilog=0

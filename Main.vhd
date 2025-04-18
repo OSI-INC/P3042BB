@@ -61,11 +61,13 @@
 -- V5.3, 15-AUG-24: Increase drive current of DMCK to 24 mA. Increment hardware version
 -- to 2 to indicate presence of the DMCK Termination Modificaiton. 
 
--- V6.1, 14-APR-25: Accelerate detector module readout, now takes 3 us per message. 
+-- V6.1, 17-APR-25: Accelerate detector module readout, now takes 3 us per message. 
 -- Add Duplicate Selector process, which reads from the Detector Module buffer and
 -- selects the most powerful of consecutive duplicate messages, then stores them in
 -- a Selected Message Buffer for the CPU to read out and store. We enhance our test
 -- test point outputs by using the HIDE and SHOW buttons to select signals.
+
+-- V6.2, 18-APR-25: Increase flash times for UPLOAD and EMPTY.
 
 -- Global constants and types.  
 library ieee;  
@@ -1602,9 +1604,10 @@ begin
 
 	-- The UPLOAD flag is set when the Relay is reading from the message buffer.
 	-- The EMPTY flag is set when the Message Buffer is nearly empty.
-	Fifo_Indicators : process (CK,RESET) is
+	Fifo_Indicators : process (CK,RCK,RESET) is
 	constant end_count : integer := 255;
-	variable upload_state, empty_state : integer range 0 to end_count;
+	variable upload_timer, empty_timer : integer range 0 to end_count;
+	variable upload_state, empty_state : integer range 0 to 1;
 	begin
 		if (RESET = '1') then
 			UPLOAD <= false;
@@ -1619,9 +1622,13 @@ begin
 					upload_state := 0;
 				end if;
 			else
-				upload_state := upload_state + 1;
+				if upload_timer < end_count-3 then
+					upload_state := 1;
+				else
+					upload_state := 0;
+				end if;
 			end if;
-			UPLOAD <= (upload_state > 0);
+			UPLOAD <= (upload_state /= 0);
 			
 			if empty_state = 0 then
 				if (to_integer(unsigned(fifo_byte_count)) < fifo_near_empty) then
@@ -1630,9 +1637,30 @@ begin
 					empty_state := 0;
 				end if;
 			else
-				empty_state := empty_state + 1;
+				if empty_timer < end_count-3 then
+					empty_state := 1;
+				else
+					empty_state := 0;
+				end if;
 			end if;
-			EMPTY <= (empty_state > 0);
+			EMPTY <= (empty_state /= 0);
+		end if;
+		
+		if (RESET = '1') then
+			upload_timer := 0;
+			empty_timer := 0;
+		elsif rising_edge(RCK) then
+			if (upload_state = 0) then
+				upload_timer := 0;
+			else
+				upload_timer := upload_timer + 1;
+			end if;
+
+			if (empty_state = 0) then
+				empty_timer := 0;
+			else
+				empty_timer := empty_timer + 1;
+			end if;
 		end if;
 	end process;
 	
@@ -1652,21 +1680,41 @@ begin
 	-- selection of test signals.	
 	Test_Points : process (CONFIG, HIDE, SHOW) is
 	begin
-		if not SHOW then
-			if not HIDE then
-				TP1 <= DMBWR;
-				TP2 <= DMIBSY;
-			else
-				TP1 <= not DMBEMPTY;
-				TP2 <= DMBRD;
+		if not CONFIG then
+			if not SHOW then
+				if not HIDE then
+					TP1 <= DMBWR;
+					TP2 <= DMIBSY;
+				else
+					TP1 <= not DMBEMPTY;
+					TP2 <= DMBRD;
+				end if;
+			else 
+				if not HIDE then
+					TP1 <= MSBWR;
+					TP2 <= MSBSY;
+				else
+					TP1 <= tp_reg(0);
+					TP2 <= MSBRD;
+				end if;
 			end if;
-		else 
-			if not HIDE then
-				TP1 <= MSBWR;
-				TP2 <= MSBSY;
-			else
-				TP1 <= tp_reg(0);
-				TP2 <= MSBRD;
+		else
+			if not SHOW then
+				if not HIDE then
+					TP1 <= to_std_logic(EMPTY);
+					TP2 <= to_std_logic(UPLOAD);
+				else
+					TP1 <= tp_reg(1);
+					TP2 <= tp_reg(2);
+				end if;
+			else 
+				if not HIDE then
+					TP1 <= DMBFULL;
+					TP2 <= MSBFULL;
+				else
+					TP1 <= to_std_logic(CDS);
+					TP2 <= to_std_logic(MWRS);
+				end if;
 			end if;
 		end if;
 	end process;
