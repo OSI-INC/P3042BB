@@ -47,7 +47,8 @@
 -- payload.
 
 -- V5.1, 29-JUN-24: Add serial interface for Transmitting Feedthrough (A3042TF).
--- Take over TP3 and TP4 for TX and RX. Outgoing data is sixteen-bit words-- that the CPU writes into a buffer for transmission. Incoming data is eight bits 
+-- Take over TP3 and TP4 for TX and RX. Outgoing data is sixteen-bit words
+-- that the CPU writes into a buffer for transmission. Incoming data is eight bits 
 -- updated each time an eight-bit transmission is received from the feedthrough.
 -- Remove unused thirty-two bit repeat counter. The TX transmitter asserts TX during
 -- RESET, which in turn resets the TF. Re-work the Reset Arbiter so it holds down
@@ -68,6 +69,9 @@
 -- test point outputs by using the HIDE and SHOW buttons to select signals.
 
 -- V6.2, 18-APR-25: Increase flash times for UPLOAD and EMPTY.
+
+-- V6.3, 21-OCT-25: Remove reset of RAM and ROM, which serves no purpose and can 
+-- interfere with proper booting of the CPU.
 
 -- Global constants and types.  
 library ieee;  
@@ -632,13 +636,11 @@ begin
 		RWE_not <= to_std_logic(not buff_write);
 	end process;
 	
--- User memory and configuration code for the CPU. This RAM will be initialized at
--- start-up with a configuration file, and so may be read after power up to configure
--- sensor. The configuration data will begin at address zero.
+-- User memory for the CPU. 
 	RAM : entity CPU_RAM port map (
 		Clock => not PCK,
 		ClockEn => '1',
-        Reset => RESET,
+        Reset => '0',
 		WE => CPURWR,
 		Address => cpu_ram_addr, 
 		Data => cpu_ram_in,
@@ -652,7 +654,7 @@ begin
 		Address => prog_addr,
         OutClock => not PCK,
         OutClockEn => '1',
-        Reset => RESET,	
+        Reset => '0',	
         Q => prog_data);
 
 -- The processor itself, and eight-bit microprocessor with thirteen-bit address bus.
