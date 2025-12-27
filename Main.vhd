@@ -73,6 +73,9 @@
 -- V6.3, 21-OCT-25: Remove reset of RAM and ROM, which serves no purpose and can 
 -- interfere with proper booting of the CPU.
 
+-- V6.4, 27-DEC-25: In the Relay Interface, make sure unconstrained bits being
+-- read by the LWDAQ Relay are set LO.
+
 -- Global constants and types.  
 library ieee;  
 use ieee.std_logic_1164.all;
@@ -1080,6 +1083,7 @@ begin
 				when cont_di_lo => 
 					cont_data <= tf_in;
 				when cont_cfsw_addr => -- The Relay looks for a zero to configure.
+					cont_data <= (others => '0');
 					cont_data(0) <= to_std_logic(not CONFIG);
 				when cont_fifo_av_addr =>
 					if to_integer(unsigned(fifo_byte_count(20 downto 17))) = 0 then
