@@ -20,7 +20,6 @@ const test_point_addr 0x0E06 ; Test Point Register (Read/Write)
 const msg_write_addr 0x0E07 ; Message Write Data (Write)
 const dm_reset_addr 0x0E08 ; Detector Module Reset (Write)
 const dm_config_addr 0x0E09 ; Detector Module Configure (Write)
-const errors_addr 0x0E0A ; Error Flag Register (Read)
 const irq_tmr1_addr 0x0E0D ; The interrupt timer value (Read)
 const relay_djr_addr 0x0E0E ; Relay Device Job Register (Read)
 const relay_crhi_addr 0x0E0F ; Relay Command Register HI (Read)
@@ -71,7 +70,7 @@ const valid_id_mask 0x0F
 const config_bit_mask 0x01
 const dpirdy_bit_mask 0x10
 const dmbrdy_bit_mask 0x20
-const dmibsy_bit_mask 0x40
+const dmerr_bit_mask 0x40
 const mrdy_bit_mask 0x80
 
 ; Display Panel Opcodes
@@ -653,12 +652,12 @@ ld (clock_hi),A
 ; Write the clock identifier, which is zero, and the clock high
 ; and low bytes to the message buffer, followed by the receiver
 ; version. These four bytes are the clock message without any
-; payload. We add "nop" instructions to give the message buffer
-; writes time to complete. We need four clock cycles between
-; writes to the message buffer. The "ld A,(nn)" instruction itself
-; takes four cycles, and is therefore sufficient. For the two-byte
-; payload of the timestamp message we transmit the communication
-; status register and the error flag register.
+; payload. We need four clock cycles between writes to the message 
+; buffer. The "ld A,(nn)" instruction itself takes four cycles.
+; For the two-byte payload of the timestamp message, in place of 
+; the top antenna power and index we transmit the communication
+; status register and transmitting feedthrough status register.
+; The former contains 
 store_clock:
 ld A,clock_id
 ld (msg_write_addr),A
@@ -671,7 +670,7 @@ add A,receiver_type
 ld (msg_write_addr),A
 ld A,(comm_status_addr)
 ld (msg_write_addr),A
-ld A,(errors_addr)
+ld A,(tf_sr_addr)
 ld (msg_write_addr),A
 
 ; Reset the timestamp interrupt.

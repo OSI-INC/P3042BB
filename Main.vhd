@@ -70,11 +70,20 @@
 
 -- V6.2, 18-APR-25: Increase flash times for UPLOAD and EMPTY.
 
--- V6.3, 21-OCT-25: Remove reset of RAM and ROM, which serves no purpose and can 
--- interfere with proper booting of the CPU.
+-- V6.3, 27-DEC-25: Remove reset of RAM and ROM, which serves no purpose and can 
+-- interfere with proper booting of the CPU. In the Relay Interface, make sure 
+-- unconstrained bits being read by the LWDAQ Relay are set LO.
 
--- V6.4, 27-DEC-25: In the Relay Interface, make sure unconstrained bits being
--- read by the LWDAQ Relay are set LO.
+-- V7.1, 31-DEC-25: Re-arrange the assignment of bits to the top antenna power and
+-- index bytes of the timestamp messages. In the communication status register we
+-- replace DMIBSY in bit 6 with DEMERR. The DMIBSY bit was not being used by any
+-- part of the OSR8 code. We eliminate the errors register, which was previously
+-- presenting only DMERR. The top antenna power byte for a clock message now 
+-- contains, lsb to msb, EMPTY, UPLOAD, ETH, CONFIG, not DPREMPTY, not MSBEMPTY
+-- DMERR, and MRDY. The top antenna index we set equal to whatever the transmitting
+-- feedthrough is reporting. In a TCB-A16, we will get zeros. But in a TCB-B16
+-- we will see, lsb to msb, X1, X2, X3, X4, EN1, EN2, EN3, EN4. These give the state
+-- of the digital output voltage, and whether or not the output driver is enabled.
 
 -- Global constants and types.  
 library ieee;  
@@ -126,7 +135,7 @@ entity main is
 -- Version numbers.
 	constant hardware_id : integer := 42;
 	constant hardware_version : integer := 2;
-	constant firmware_version : integer := 6;
+	constant firmware_version : integer := 7;
 
 -- Configuration of OSR8.
 	constant prog_addr_len : integer := 11;
@@ -229,7 +238,6 @@ architecture behavior of main is
 	constant msg_write_addr : integer := 7; -- Message Write Data (Write)
 	constant dm_reset_addr : integer := 8; -- Detector Module Reset (Write)
 	constant dm_config_addr : integer := 9; -- Detector Module Configure (Write)
-	constant errors_addr : integer := 10; -- Error Flags (Read)
 	constant irq_tmr1_addr : integer := 13; -- Timer One value (Read)
 	constant relay_djr_addr : integer := 14; -- Relay Device Job Register (Read)
 	constant relay_crhi_addr : integer := 15; -- Relay Command Register HI (Read)
@@ -813,9 +821,6 @@ begin
 				when relay_crhi_addr => cpu_data_in <= cont_cr(15 downto 8);
 				when relay_crlo_addr => cpu_data_in <= cont_cr(7 downto 0);
 				when relay_der_addr => cpu_data_in <= cont_der;
-				when errors_addr =>
-					cpu_data_in <= (others => '0');
-					cpu_data_in(0) <= DMERR;
 				when comm_status_addr => 
 					cpu_data_in(0) <= to_std_logic(EMPTY);
 					cpu_data_in(1) <= to_std_logic(UPLOAD);
@@ -823,7 +828,7 @@ begin
 					cpu_data_in(3) <= to_std_logic(CONFIG);
 					cpu_data_in(4) <= not DPREMPTY;
 					cpu_data_in(5) <= not MSBEMPTY;
-					cpu_data_in(6) <= DMIBSY;
+					cpu_data_in(6) <= DMERR;
 					cpu_data_in(7) <= MRDY;
 				when dpid_addr => 
 					cpu_data_in <= dp_in_waiting;
