@@ -1,4 +1,11 @@
 P3042BB_tcr.dir/
 impl1/
-.recovery
-Untitled.tpf
+.recovery/
+Untitled.*
+.*
+_*
+*.log
+*.html
+*.edn
+*.srp
+*.xml
